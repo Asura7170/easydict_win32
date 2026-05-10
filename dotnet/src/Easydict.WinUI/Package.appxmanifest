@@ -22,10 +22,14 @@
 
   <Dependencies>
     <!-- MinVersion 10.0.19041.0 (Windows 10 2004) required for .msix bundle support -->
-    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
-    <!-- Windows App SDK runtime framework dependency (required for WinRT activation in packaged mode) -->
-    <PackageDependency Name="Microsoft.WindowsAppRuntime.1.8"
-                       MinVersion="8000.731.1532.0"
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26200.0" />
+    <!-- Windows App SDK runtime framework dependency (required for WinRT activation in packaged mode).
+         WinAppSDK 2.x: framework package short name drops the minor — `Microsoft.WindowsAppRuntime.2`
+         (not `.2.0`). MinVersion is the value of the `MicrosoftWindowsAppSDKFoundationAppXVersion`
+         MSBuild property shipped by the matching `Microsoft.WindowsAppSDK.Runtime` NuGet — for 2.0.1
+         that's 2.0.1.0. -->
+    <PackageDependency Name="Microsoft.WindowsAppRuntime.2"
+                       MinVersion="2.0.1.0"
                        Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" />
   </Dependencies>
 

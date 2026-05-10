@@ -40,7 +40,7 @@ public static class Program
 
         // Unpackaged (Inno/portable) installs rely on HKCU protocol registration.
         // Repair registration early so future easydict:// launches are reliable.
-        if (!IsPackaged())
+        if (!EasydictConditions.IsPackaged)
         {
             ProtocolRegistrationService.EnsureRegistered();
         }
@@ -67,7 +67,7 @@ public static class Program
             }
         }
 
-        // Normal WinUI 3 startup (replicates the auto-generated Main).
+        // Replicates the auto-generated Main suppressed by DISABLE_XAML_GENERATED_MAIN.
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(p =>
         {
@@ -84,6 +84,12 @@ public static class Program
     /// </summary>
     private static bool IsOcrProtocolActivation()
     {
+        // AppInstance.GetActivatedEventArgs throws when there is no activation context
+        // (plain command-line launch or unpackaged). Unpackaged builds receive
+        // easydict:// via argv, which Main handles directly.
+        if (!EasydictConditions.IsPackaged)
+            return false;
+
         try
         {
             var activatedArgs = AppInstance.GetCurrent().GetActivatedEventArgs();
@@ -97,31 +103,10 @@ public static class Program
                     StringComparison.OrdinalIgnoreCase);
             }
         }
-        catch (InvalidOperationException)
-        {
-            // AppInstance API may not be available in all scenarios (e.g., unpackaged).
-        }
         catch (System.Runtime.InteropServices.COMException)
         {
             // WinRT activation infrastructure not available.
         }
         return false;
-    }
-
-    private static bool IsPackaged()
-    {
-        try
-        {
-            _ = Windows.ApplicationModel.Package.Current;
-            return true;
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
-        }
-        catch (System.Runtime.InteropServices.COMException)
-        {
-            return false;
-        }
     }
 }

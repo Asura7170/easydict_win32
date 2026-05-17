@@ -734,7 +734,10 @@ public sealed partial class SettingsPage : Page
 
         // Service configuration controls (API Keys, Endpoints, Models, etc.)
         // TextBox/PasswordBox headers for each service
-        DeepLKeyBox.Header = loc.GetString("ApiKeyOptional");
+        DeepLFreeCheck.Content = loc.GetString("DeepLFreeOption");
+        DeepLQualityCheck.Content = loc.GetString("DeepLQualityOption");
+        DeepLDescriptionText.Text = loc.GetString("DeepLDescription");
+        UpdateDeepLApiKeyRequirementUi();
         OpenAIKeyBox.Header = loc.GetString("ApiKey");
         OpenAIEndpointBox.Header = loc.GetString("EndpointOptional");
         OpenAIModelCombo.Header = loc.GetString("Model");
@@ -1392,8 +1395,10 @@ public sealed partial class SettingsPage : Page
         VisionLayoutServiceCombo.SelectionChanged += OnSettingChanged;
 
         // CheckBox changes
-        DeepLFreeCheck.Checked += OnSettingChanged;
-        DeepLFreeCheck.Unchecked += OnSettingChanged;
+        DeepLFreeCheck.Checked += OnDeepLModeChanged;
+        DeepLFreeCheck.Unchecked += OnDeepLModeChanged;
+        DeepLQualityCheck.Checked += OnDeepLModeChanged;
+        DeepLQualityCheck.Unchecked += OnDeepLModeChanged;
 
         // Service selection changes (via PropertyChanged on ServiceCheckItem)
         RegisterServiceCollectionHandlers(_mainWindowServices);
@@ -1482,8 +1487,10 @@ public sealed partial class SettingsPage : Page
         LayoutDetectionModeCombo.SelectionChanged -= OnLayoutDetectionModeChanged;
         VisionLayoutServiceCombo.SelectionChanged -= OnSettingChanged;
 
-        DeepLFreeCheck.Checked -= OnSettingChanged;
-        DeepLFreeCheck.Unchecked -= OnSettingChanged;
+        DeepLFreeCheck.Checked -= OnDeepLModeChanged;
+        DeepLFreeCheck.Unchecked -= OnDeepLModeChanged;
+        DeepLQualityCheck.Checked -= OnDeepLModeChanged;
+        DeepLQualityCheck.Unchecked -= OnDeepLModeChanged;
 
         UnregisterServiceCollectionHandlers(_mainWindowServices);
         UnregisterServiceCollectionHandlers(_miniWindowServices);
@@ -1682,6 +1689,51 @@ public sealed partial class SettingsPage : Page
         SaveButton.Visibility = Visibility.Visible;
     }
 
+    private void OnDeepLModeChanged(object sender, RoutedEventArgs e)
+    {
+        if (_isLoading) return;
+
+        ApplyDeepLModeMutualExclusion();
+        OnSettingChanged(sender, e);
+    }
+
+    private void ApplyDeepLModeMutualExclusion()
+    {
+        var useQualityOptimized = DeepLQualityCheck.IsChecked == true;
+        if (useQualityOptimized && DeepLFreeCheck.IsChecked == true)
+        {
+            // Suppress re-entry into OnDeepLModeChanged from the IsChecked mutation;
+            // we'll call OnSettingChanged once from the outer handler.
+            var wasLoading = _isLoading;
+            _isLoading = true;
+            try { DeepLFreeCheck.IsChecked = false; }
+            finally { _isLoading = wasLoading; }
+        }
+
+        DeepLFreeCheck.IsEnabled = !useQualityOptimized;
+        UpdateDeepLApiKeyRequirementUi();
+    }
+
+    private void UpdateDeepLApiKeyRequirementUi()
+    {
+        DeepLKeyBox.Header = LocalizationService.Instance.GetString(
+            DeepLQualityCheck.IsChecked == true ? "ApiKey" : "ApiKeyOptional");
+    }
+
+    private async Task<bool> ValidateDeepLQualityApiKeyAsync(string titleKey)
+    {
+        if (DeepLQualityCheck.IsChecked != true || !string.IsNullOrWhiteSpace(DeepLKeyBox.Password))
+        {
+            return true;
+        }
+
+        var loc = LocalizationService.Instance;
+        await ShowSimpleDialogAsync(
+            loc.GetString(titleKey),
+            loc.GetString("DeepLQualityApiKeyRequiredMessage"));
+        return false;
+    }
+
     private void LoadSettings(bool deferLazyTabData = false)
     {
         if (ShouldLoadSettingsTab(SettingsTabId.Services, deferLazyTabData))
@@ -1689,9 +1741,11 @@ public sealed partial class SettingsPage : Page
             // International services toggle
             EnableInternationalServicesToggle.IsOn = _settings.EnableInternationalServices;
 
-            // DeepL settings
+            // DeepL settings (SettingsService normalizes on Load: Quality => !Free)
             DeepLKeyBox.Password = _settings.DeepLApiKey ?? string.Empty;
             DeepLFreeCheck.IsChecked = _settings.DeepLUseFreeApi;
+            DeepLQualityCheck.IsChecked = _settings.DeepLUseQualityOptimized;
+            ApplyDeepLModeMutualExclusion();
 
             // OpenAI settings
             OpenAIKeyBox.Password = _settings.OpenAIApiKey ?? string.Empty;
@@ -2823,6 +2877,11 @@ public sealed partial class SettingsPage : Page
             return false;
         }
 
+        if (!await ValidateDeepLQualityApiKeyAsync("StatusError"))
+        {
+            return false;
+        }
+
         // Validate proxy URI
         var proxyUri = ProxyUriBox.Text?.Trim() ?? "";
         if (ProxyEnabledToggle.IsOn && string.IsNullOrWhiteSpace(proxyUri))
@@ -2869,10 +2928,11 @@ public sealed partial class SettingsPage : Page
             .Select(item => item.Tag)
             .ToList();
 
-        // Save DeepL settings
+        // Save DeepL settings (SettingsService.Save normalizes: Quality => !Free)
         var deepLKey = DeepLKeyBox.Password;
         _settings.DeepLApiKey = string.IsNullOrWhiteSpace(deepLKey) ? null : deepLKey;
         _settings.DeepLUseFreeApi = DeepLFreeCheck.IsChecked ?? true;
+        _settings.DeepLUseQualityOptimized = DeepLQualityCheck.IsChecked ?? false;
 
         // Save OpenAI settings
         var openAIKey = OpenAIKeyBox.Password;
@@ -3553,6 +3613,11 @@ public sealed partial class SettingsPage : Page
     /// </summary>
     private async void OnTestDeepL(object sender, RoutedEventArgs e)
     {
+        if (!await ValidateDeepLQualityApiKeyAsync("TestFailedTitle"))
+        {
+            return;
+        }
+
         await TestServiceAsync("deepl", service =>
         {
             if (service is DeepLService deepl)
@@ -3560,7 +3625,8 @@ public sealed partial class SettingsPage : Page
                 var apiKey = DeepLKeyBox.Password;
                 deepl.Configure(
                     string.IsNullOrWhiteSpace(apiKey) ? null : apiKey,
-                    useWebFirst: DeepLFreeCheck.IsChecked ?? true);
+                    useWebFirst: DeepLFreeCheck.IsChecked ?? true,
+                    useQualityOptimized: DeepLQualityCheck.IsChecked ?? false);
             }
         }, TestDeepLButton, DeepLStatusText);
     }

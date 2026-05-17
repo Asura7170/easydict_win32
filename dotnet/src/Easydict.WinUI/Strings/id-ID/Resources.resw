@@ -184,6 +184,12 @@
   <data name="DeepLFreeOption" xml:space="preserve">
     <value>Gunakan API Gratis (terjemahan web tidak memerlukan API key)</value>
   </data>
+  <data name="DeepLQualityOption" xml:space="preserve">
+    <value>Gunakan model dioptimalkan untuk kualitas (hanya API; lebih lambat, kualitas lebih tinggi)</value>
+  </data>
+  <data name="DeepLQualityApiKeyRequiredMessage" xml:space="preserve">
+    <value>Mode DeepL yang dioptimalkan untuk kualitas memerlukan kunci API.</value>
+  </data>
   <data name="OpenAIDescription" xml:space="preserve">
     <value>Anda dapat mengetik nama model kustom secara langsung.</value>
   </data>

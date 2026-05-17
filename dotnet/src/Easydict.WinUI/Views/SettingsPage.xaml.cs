@@ -1320,6 +1320,7 @@ public sealed partial class SettingsPage : Page
         FirstLanguageCombo.SelectionChanged += OnSettingChanged;
         SecondLanguageCombo.SelectionChanged += OnSettingChanged;
         OpenAIModelCombo.SelectionChanged += OnSettingChanged;
+        OpenAIApiFormatCombo.SelectionChanged += OnOpenAIApiFormatChanged;
         OllamaModelCombo.SelectionChanged += OnSettingChanged;
         BuiltInModelCombo.SelectionChanged += OnSettingChanged;
         DeepSeekModelCombo.SelectionChanged += OnSettingChanged;
@@ -1417,6 +1418,7 @@ public sealed partial class SettingsPage : Page
         FirstLanguageCombo.SelectionChanged -= OnSettingChanged;
         SecondLanguageCombo.SelectionChanged -= OnSettingChanged;
         OpenAIModelCombo.SelectionChanged -= OnSettingChanged;
+        OpenAIApiFormatCombo.SelectionChanged -= OnOpenAIApiFormatChanged;
         OllamaModelCombo.SelectionChanged -= OnSettingChanged;
         BuiltInModelCombo.SelectionChanged -= OnSettingChanged;
         DeepSeekModelCombo.SelectionChanged -= OnSettingChanged;
@@ -1750,6 +1752,7 @@ public sealed partial class SettingsPage : Page
             // OpenAI settings
             OpenAIKeyBox.Password = _settings.OpenAIApiKey ?? string.Empty;
             OpenAIEndpointBox.Text = _settings.OpenAIEndpoint;
+            SetTagComboValue(OpenAIApiFormatCombo, _settings.OpenAIApiFormatOverride, "Auto");
             SetEditableComboValue(OpenAIModelCombo, _settings.OpenAIModel);
 
             // DeepSeek settings
@@ -1884,6 +1887,7 @@ public sealed partial class SettingsPage : Page
             OcrEndpointBox.Text = _settings.OcrEndpoint;
             OcrModelBox.Text = _settings.OcrModel;
             OcrSystemPromptBox.Text = _settings.OcrSystemPrompt;
+            ApplyOcrEngineDefaultsIfNeeded(GetSelectedOcrEngine());
             UpdateOcrEngineUI();
 
             // HTTP Proxy settings
@@ -2677,9 +2681,7 @@ public sealed partial class SettingsPage : Page
 
     private OcrServiceOptions GetCurrentOcrServiceOptions()
     {
-        var engine = Enum.TryParse<OcrEngineType>(GetSelectedTag(OcrEngineCombo), out var parsedEngine)
-            ? parsedEngine
-            : OcrEngineType.WindowsNative;
+        var engine = GetSelectedOcrEngine();
 
         return new OcrServiceOptions(
             engine,
@@ -2736,6 +2738,45 @@ public sealed partial class SettingsPage : Page
         }
         // Custom value - set Text directly
         combo.Text = value;
+    }
+
+    /// <summary>
+    /// Select the item whose Tag matches <paramref name="value"/> (case-insensitive),
+    /// falling back to the item with Tag = <paramref name="defaultTag"/>.
+    /// For non-editable combos.
+    /// </summary>
+    private static void SetTagComboValue(ComboBox combo, string? value, string defaultTag)
+    {
+        var target = string.IsNullOrEmpty(value) ? defaultTag : value;
+        for (int i = 0; i < combo.Items.Count; i++)
+        {
+            if (combo.Items[i] is ComboBoxItem item &&
+                string.Equals(item.Tag?.ToString(), target, StringComparison.OrdinalIgnoreCase))
+            {
+                combo.SelectedIndex = i;
+                return;
+            }
+        }
+
+        // Fall back to default tag if the saved value is unrecognized.
+        for (int i = 0; i < combo.Items.Count; i++)
+        {
+            if (combo.Items[i] is ComboBoxItem item &&
+                string.Equals(item.Tag?.ToString(), defaultTag, StringComparison.OrdinalIgnoreCase))
+            {
+                combo.SelectedIndex = i;
+                return;
+            }
+        }
+    }
+
+    private static string GetTagComboValue(ComboBox combo, string defaultTag)
+    {
+        if (combo.SelectedItem is ComboBoxItem item && item.Tag is string tag && !string.IsNullOrEmpty(tag))
+        {
+            return tag;
+        }
+        return defaultTag;
     }
 
     private async void OnBackClick(object sender, RoutedEventArgs e)
@@ -2939,9 +2980,10 @@ public sealed partial class SettingsPage : Page
         _settings.OpenAIApiKey = string.IsNullOrWhiteSpace(openAIKey) ? null : openAIKey;
         var openAIEndpoint = OpenAIEndpointBox.Text?.Trim();
         _settings.OpenAIEndpoint = string.IsNullOrWhiteSpace(openAIEndpoint)
-            ? "https://api.openai.com/v1/chat/completions"
+            ? OpenAIService.DefaultEndpoint
             : openAIEndpoint;
-        _settings.OpenAIModel = GetEditableComboValue(OpenAIModelCombo, "gpt-4o-mini");
+        _settings.OpenAIApiFormatOverride = GetTagComboValue(OpenAIApiFormatCombo, "Auto");
+        _settings.OpenAIModel = GetEditableComboValue(OpenAIModelCombo, OpenAIService.DefaultModel);
 
         // Save DeepSeek settings
         var deepSeekKey = DeepSeekKeyBox.Password;
@@ -3151,15 +3193,42 @@ public sealed partial class SettingsPage : Page
 
     private void OnOcrEngineChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (!_isLoading)
+        {
+            ApplyOcrEngineDefaultsIfNeeded(GetSelectedOcrEngine());
+        }
+
         UpdateOcrEngineUI();
         OnSettingChanged(sender, e);
     }
 
     private void UpdateOcrEngineUI()
     {
-        var selectedEngine = GetSelectedTag(OcrEngineCombo);
-        var isAdvanced = selectedEngine == "Ollama" || selectedEngine == "CustomApi";
+        var engine = GetSelectedOcrEngine();
+        var isAdvanced = engine is OcrEngineType.Ollama or OcrEngineType.CustomApi;
         AdvancedOcrPanel.Visibility = isAdvanced ? Visibility.Visible : Visibility.Collapsed;
+        OcrEndpointBox.PlaceholderText = OcrServiceOptions.GetDefaultEndpoint(engine);
+        OcrModelBox.PlaceholderText = OcrServiceOptions.GetDefaultModel(engine);
+    }
+
+    private OcrEngineType GetSelectedOcrEngine()
+    {
+        return Enum.TryParse<OcrEngineType>(GetSelectedTag(OcrEngineCombo), out var parsedEngine)
+            ? parsedEngine
+            : OcrEngineType.WindowsNative;
+    }
+
+    private void ApplyOcrEngineDefaultsIfNeeded(OcrEngineType engine)
+    {
+        if (OcrServiceOptions.IsKnownDefaultEndpoint(OcrEndpointBox.Text))
+        {
+            OcrEndpointBox.Text = OcrServiceOptions.GetDefaultEndpoint(engine);
+        }
+
+        if (OcrServiceOptions.IsKnownDefaultModel(OcrModelBox.Text))
+        {
+            OcrModelBox.Text = OcrServiceOptions.GetDefaultModel(engine);
+        }
     }
 
     private async void OnTestOcrConnection(object sender, RoutedEventArgs e)
@@ -3188,7 +3257,11 @@ public sealed partial class SettingsPage : Page
 
             using (capture)
             {
-                var ocrEngine = OcrServiceFactory.Create(GetCurrentOcrServiceOptions());
+                using var httpClient = OcrServiceFactory.CreateProxyAwareHttpClient(
+                    ProxyEnabledToggle.IsOn,
+                    ProxyUriBox.Text,
+                    ProxyBypassLocalToggle.IsOn);
+                var ocrEngine = OcrServiceFactory.Create(GetCurrentOcrServiceOptions(), httpClient);
                 var result = await ocrEngine.RecognizeAsync(capture, null, CancellationToken.None);
 
                 DispatcherQueue.TryEnqueue(() =>
@@ -3496,7 +3569,7 @@ public sealed partial class SettingsPage : Page
     /// <param name="configureAction">Action to configure the service with current UI values.</param>
     /// <param name="testButton">The test button to disable during testing.</param>
     /// <param name="statusIndicator">Optional TextBlock to show success indicator.</param>
-    private async Task TestServiceAsync(string serviceId, Action<ITranslationService> configureAction, Button testButton, TextBlock? statusIndicator = null)
+    private async Task TestServiceAsync(string serviceId, Action<ITranslationService> configureAction, Button testButton, TextBlock? statusIndicator = null, Action<ITranslationService>? onSuccess = null)
     {
         var loc = LocalizationService.Instance;
         var originalContent = testButton.Content;
@@ -3542,6 +3615,9 @@ public sealed partial class SettingsPage : Page
 
             // Run the test translation
             var result = await service.TranslateAsync(request);
+
+            // Let callers inspect post-translate state (e.g. detected API format).
+            onSuccess?.Invoke(service);
 
             // Show success indicator on expander header
             if (statusIndicator != null)
@@ -3636,20 +3712,66 @@ public sealed partial class SettingsPage : Page
     /// </summary>
     private async void OnTestOpenAI(object sender, RoutedEventArgs e)
     {
+        var formatTag = GetTagComboValue(OpenAIApiFormatCombo, "Auto");
+        var formatOverride = Enum.TryParse<OpenAIApiFormat>(formatTag, ignoreCase: true, out var f)
+            ? f
+            : OpenAIApiFormat.Auto;
+
         await TestServiceAsync("openai", service =>
         {
             if (service is OpenAIService openai)
             {
                 var apiKey = OpenAIKeyBox.Password;
                 var endpoint = OpenAIEndpointBox.Text?.Trim();
-                var model = GetEditableComboValue(OpenAIModelCombo, "gpt-4o-mini");
+                var model = GetEditableComboValue(OpenAIModelCombo, OpenAIService.DefaultModel);
 
                 openai.Configure(
                     string.IsNullOrWhiteSpace(apiKey) ? "" : apiKey,
-                    string.IsNullOrWhiteSpace(endpoint) ? "https://api.openai.com/v1/chat/completions" : endpoint,
-                    model);
+                    string.IsNullOrWhiteSpace(endpoint) ? OpenAIService.DefaultEndpoint : endpoint,
+                    model,
+                    formatOverride: formatOverride);
             }
-        }, TestOpenAIButton, OpenAIStatusText);
+        }, TestOpenAIButton, OpenAIStatusText, onSuccess: service =>
+        {
+            if (service is OpenAIService openai && formatOverride == OpenAIApiFormat.Auto)
+            {
+                UpdateOpenAIDetectedFormatText(openai.DetectedFormat);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Show or hide the "Detected: X" hint under the API Format combo based on
+    /// the current selection. The hint only appears in Auto mode after a
+    /// successful test has resolved a concrete format.
+    /// </summary>
+    private void OnOpenAIApiFormatChanged(object sender, SelectionChangedEventArgs e)
+    {
+        OnSettingChanged(sender, e);
+
+        var tag = GetTagComboValue(OpenAIApiFormatCombo, "Auto");
+        if (!string.Equals(tag, "Auto", StringComparison.OrdinalIgnoreCase))
+        {
+            // Pinned modes: format is explicit, no detection result to surface.
+            OpenAIDetectedFormatText.Visibility = Visibility.Collapsed;
+        }
+        // In Auto mode the label stays whatever it was — it's populated by a
+        // successful test in OnTestOpenAI.
+    }
+
+    private void UpdateOpenAIDetectedFormatText(OpenAIApiFormat detected)
+    {
+        if (detected == OpenAIApiFormat.Auto)
+        {
+            OpenAIDetectedFormatText.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var label = detected == OpenAIApiFormat.Responses
+            ? "Responses API"
+            : "Chat Completions API";
+        OpenAIDetectedFormatText.Text = $"Detected: {label}";
+        OpenAIDetectedFormatText.Visibility = Visibility.Visible;
     }
 
     /// <summary>

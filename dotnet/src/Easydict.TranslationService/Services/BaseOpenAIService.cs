@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -11,6 +10,12 @@ namespace Easydict.TranslationService.Services;
 /// <summary>
 /// Base class for OpenAI-compatible streaming translation services.
 /// Mirrors macOS BaseOpenAIService pattern with SSE streaming support.
+/// Supports both Chat Completions and Responses API formats; the format
+/// is chosen per request based on the endpoint URL suffix
+/// (<c>/responses</c> → Responses, anything else → Chat Completions) or
+/// by an explicit override via <see cref="PinFormat"/>. Pinning bypasses
+/// URL inspection — the caller is responsible for ensuring the endpoint
+/// accepts the pinned format.
 /// </summary>
 public abstract class BaseOpenAIService : BaseTranslationService, IStreamTranslationService, IGrammarCorrectionService
 {
@@ -91,10 +96,12 @@ public abstract class BaseOpenAIService : BaseTranslationService, IStreamTransla
         You are a translation expert proficient in various languages, focusing solely on translating text without interpretation. You accurately understand the meanings of proper nouns, idioms, metaphors, allusions, and other obscure words in sentences, translating them appropriately based on the context and language environment. The translation should be natural and fluent. Only return the translated text, without including redundant quotes or additional notes.
         """;
 
+    private OpenAIApiFormat? _formatOverride;
+
     protected BaseOpenAIService(HttpClient httpClient) : base(httpClient) { }
 
     /// <summary>
-    /// API endpoint URL for chat completions.
+    /// API endpoint URL for chat completions or responses.
     /// </summary>
     public abstract string Endpoint { get; }
 
@@ -116,6 +123,13 @@ public abstract class BaseOpenAIService : BaseTranslationService, IStreamTransla
     public virtual double Temperature => 0.3;
 
     /// <summary>
+    /// Optional Responses API reasoning effort. OpenAI's GPT-5 family uses this
+    /// newer control surface for reasoning behavior; third-party
+    /// OpenAI-compatible services leave it unset by default.
+    /// </summary>
+    protected virtual string? ResponsesReasoningEffort => null;
+
+    /// <summary>
     /// Whether this service requires an API key to function.
     /// Override to false for services like Ollama that don't need auth.
     /// </summary>
@@ -125,6 +139,51 @@ public abstract class BaseOpenAIService : BaseTranslationService, IStreamTransla
     /// This is a streaming service.
     /// </summary>
     public bool IsStreaming => true;
+
+    /// <summary>
+    /// Format that will be used for the next request — either the explicit
+    /// override (set via <see cref="PinFormat"/>) or the format inferred from
+    /// the endpoint URL.
+    /// </summary>
+    public OpenAIApiFormat DetectedFormat => _formatOverride ?? DetectFormatFromUrl(Endpoint);
+
+    /// <summary>
+    /// Clear any pinned format. The next request will infer the format from
+    /// the endpoint URL. Subclasses call this from their Configure() methods.
+    /// </summary>
+    protected void ResetFormatDetection() => _formatOverride = null;
+
+    /// <summary>
+    /// Pin the API format, bypassing URL inspection. Subclasses call this
+    /// from Configure() when the user has explicitly chosen a format.
+    /// </summary>
+    protected void PinFormat(OpenAIApiFormat format)
+    {
+        if (format == OpenAIApiFormat.Auto)
+        {
+            throw new ArgumentException(
+                "Use ResetFormatDetection() to clear the pinned format.", nameof(format));
+        }
+        _formatOverride = format;
+    }
+
+    /// <summary>
+    /// Inspect the endpoint URL path to determine API format. Returns
+    /// <see cref="OpenAIApiFormat.ChatCompletions"/> for any URL that
+    /// doesn't end with the Responses suffix — Chat Completions is the
+    /// safe default since it is supported by virtually every
+    /// OpenAI-compatible third-party provider.
+    /// </summary>
+    internal static OpenAIApiFormat DetectFormatFromUrl(string endpoint)
+    {
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
+            return OpenAIApiFormat.ChatCompletions;
+
+        var path = uri.AbsolutePath.TrimEnd('/');
+        return path.EndsWith("/responses", StringComparison.OrdinalIgnoreCase)
+            ? OpenAIApiFormat.Responses
+            : OpenAIApiFormat.ChatCompletions;
+    }
 
     /// <summary>
     /// Implement non-streaming translation by consuming the stream.
@@ -148,6 +207,7 @@ public abstract class BaseOpenAIService : BaseTranslationService, IStreamTransla
 
     /// <summary>
     /// Stream translate text using OpenAI-compatible API.
+    /// Dispatches to Chat Completions or Responses path based on the endpoint URL.
     /// </summary>
     public virtual async IAsyncEnumerable<string> TranslateStreamAsync(
         TranslationRequest request,
@@ -155,52 +215,42 @@ public abstract class BaseOpenAIService : BaseTranslationService, IStreamTransla
     {
         ValidateConfiguration();
 
+        var detectedFormat = DetectedFormat;
+        var strategy = OpenAIFormatStrategies.For(detectedFormat);
         var messages = BuildChatMessages(request);
-        var requestBody = BuildRequestBody(messages);
+        var requestBody = strategy.BuildRequestBody(
+            messages,
+            Model,
+            GetEffectiveTemperature(detectedFormat),
+            GetReasoningEffort(detectedFormat));
 
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, Endpoint);
-        httpRequest.Content = new StringContent(
-            JsonSerializer.Serialize(requestBody),
-            Encoding.UTF8,
-            "application/json");
-
-        if (!string.IsNullOrEmpty(ApiKey))
+        await foreach (var chunk in SendAndParseAsync(strategy, requestBody, cancellationToken).ConfigureAwait(false))
         {
-            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ApiKey);
+            yield return chunk;
         }
+    }
 
-        ConfigureHttpRequest(httpRequest);
+    /// <summary>
+    /// Stream grammar correction output using OpenAI-compatible API.
+    /// </summary>
+    public virtual async IAsyncEnumerable<string> CorrectGrammarStreamAsync(
+        GrammarCorrectionRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ValidateConfiguration();
 
-        HttpResponseMessage response;
-        try
+        var detectedFormat = DetectedFormat;
+        var strategy = OpenAIFormatStrategies.For(detectedFormat);
+        var messages = BuildGrammarCorrectionMessages(request);
+        var requestBody = strategy.BuildRequestBody(
+            messages,
+            Model,
+            GetEffectiveTemperature(detectedFormat),
+            GetReasoningEffort(detectedFormat));
+
+        await foreach (var chunk in SendAndParseAsync(strategy, requestBody, cancellationToken).ConfigureAwait(false))
         {
-            response = await HttpClient.SendAsync(
-                httpRequest,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new TranslationException($"Network error: {ex.Message}", ex)
-            {
-                ErrorCode = TranslationErrorCode.NetworkError,
-                ServiceId = ServiceId
-            };
-        }
-
-        using (response)
-        {
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-                throw CreateErrorFromResponse(response.StatusCode, errorBody);
-            }
-
-            var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            await foreach (var chunk in SseParser.ParseStreamAsync(stream, cancellationToken).ConfigureAwait(false))
-            {
-                yield return chunk;
-            }
+            yield return chunk;
         }
     }
 
@@ -229,16 +279,23 @@ public abstract class BaseOpenAIService : BaseTranslationService, IStreamTransla
     }
 
     /// <summary>
-    /// Build the request body for the API call.
+    /// Build chat messages for grammar correction request.
+    /// Override to customize prompts.
     /// </summary>
-    protected virtual object BuildRequestBody(List<ChatMessage> messages)
+    protected virtual List<ChatMessage> BuildGrammarCorrectionMessages(GrammarCorrectionRequest request)
     {
-        return new
+        var userPrompt = request.Language == Language.Auto
+            ? $"Correct the grammar in the following text:\n\n{request.Text}"
+            : $"Correct the grammar in the following {request.Language.GetDisplayName()} text. The result MUST remain in {request.Language.GetDisplayName()}:\n\n{request.Text}";
+
+        var systemPrompt = request.IncludeExplanations
+            ? GrammarCorrectionSystemPromptWithExplanation
+            : GrammarCorrectionSystemPrompt;
+
+        return new List<ChatMessage>
         {
-            model = Model,
-            messages = messages.Select(m => new { role = m.RoleString, content = m.Content }),
-            temperature = Temperature,
-            stream = true
+            new(ChatRole.System, systemPrompt),
+            new(ChatRole.User, userPrompt)
         };
     }
 
@@ -247,6 +304,14 @@ public abstract class BaseOpenAIService : BaseTranslationService, IStreamTransla
     /// before it is sent. Called after Authorization header is set.
     /// </summary>
     protected virtual void ConfigureHttpRequest(HttpRequestMessage request) { }
+
+    /// <summary>
+    /// Allows provider-specific model compatibility adjustments before the
+    /// request body is serialized.
+    /// </summary>
+    protected virtual double GetEffectiveTemperature(OpenAIApiFormat format) => Temperature;
+
+    private string? GetReasoningEffort(OpenAIApiFormat format) => ResponsesReasoningEffort;
 
     /// <summary>
     /// Validate service configuration before making API calls.
@@ -272,19 +337,11 @@ public abstract class BaseOpenAIService : BaseTranslationService, IStreamTransla
         }
     }
 
-    /// <summary>
-    /// Stream grammar correction output using OpenAI-compatible API.
-    /// Reuses the same SSE streaming infrastructure as translation.
-    /// </summary>
-    public virtual async IAsyncEnumerable<string> CorrectGrammarStreamAsync(
-        GrammarCorrectionRequest request,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    private async IAsyncEnumerable<string> SendAndParseAsync(
+        IOpenAIFormatStrategy strategy,
+        object requestBody,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        ValidateConfiguration();
-
-        var messages = BuildGrammarCorrectionMessages(request);
-        var requestBody = BuildRequestBody(messages);
-
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, Endpoint);
         httpRequest.Content = new StringContent(
             JsonSerializer.Serialize(requestBody),
@@ -324,32 +381,10 @@ public abstract class BaseOpenAIService : BaseTranslationService, IStreamTransla
             }
 
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            await foreach (var chunk in SseParser.ParseStreamAsync(stream, cancellationToken).ConfigureAwait(false))
+            await foreach (var chunk in strategy.ParseStreamAsync(stream, cancellationToken).ConfigureAwait(false))
             {
                 yield return chunk;
             }
         }
     }
-
-    /// <summary>
-    /// Build chat messages for grammar correction request.
-    /// Override to customize prompts.
-    /// </summary>
-    protected virtual List<ChatMessage> BuildGrammarCorrectionMessages(GrammarCorrectionRequest request)
-    {
-        var userPrompt = request.Language == Language.Auto
-            ? $"Correct the grammar in the following text:\n\n{request.Text}"
-            : $"Correct the grammar in the following {request.Language.GetDisplayName()} text. The result MUST remain in {request.Language.GetDisplayName()}:\n\n{request.Text}";
-
-        var systemPrompt = request.IncludeExplanations
-            ? GrammarCorrectionSystemPromptWithExplanation
-            : GrammarCorrectionSystemPrompt;
-
-        return new List<ChatMessage>
-        {
-            new(ChatRole.System, systemPrompt),
-            new(ChatRole.User, userPrompt)
-        };
-    }
-
 }

@@ -360,16 +360,22 @@ public sealed class FoundryLocalServiceTests
                 scriptPath,
                 statusCommandTimeout: TimeSpan.FromSeconds(2),
                 startCommandTimeout: TimeSpan.FromMilliseconds(100));
+            var stopwatch = Stopwatch.StartNew();
 
             var act = async () => await resolver.StartServiceAsync(CancellationToken.None);
 
             var exception = await act.Should().ThrowAsync<FoundryLocalCliCommandException>();
+            stopwatch.Stop();
             exception.Which.ExitCode.Should().Be(-2);
             exception.Which.Message.Should().Contain("Timed out");
+            // The configured cancellation deadline is 100ms; allow plenty of headroom
+            // for process-tree kill latency on slow CI runners (observed ~13s on
+            // windows-latest), but still well under any "actually broken" threshold.
+            stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(30));
         }
         finally
         {
-            Directory.Delete(tempDirectory, recursive: true);
+            await TryDeleteDirectoryAsync(tempDirectory);
         }
     }
 
@@ -409,7 +415,36 @@ public sealed class FoundryLocalServiceTests
         }
         finally
         {
-            Directory.Delete(tempDirectory, recursive: true);
+            await TryDeleteDirectoryAsync(tempDirectory);
+        }
+    }
+
+    /// <summary>
+    /// Delete a temp directory, retrying briefly on IOException — Windows may
+    /// hold file handles for a short window after a killed process exits even
+    /// though Process.HasExited has flipped to true.
+    /// </summary>
+    private static async Task TryDeleteDirectoryAsync(string path)
+    {
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            try
+            {
+                Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return;
+            }
+            catch (IOException) when (attempt < 9)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200));
+            }
+            catch (UnauthorizedAccessException) when (attempt < 9)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200));
+            }
         }
     }
 

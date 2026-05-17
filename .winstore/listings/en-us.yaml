@@ -28,21 +28,17 @@ features:
 - On-device local AI translation, optimized for Copilot+ PCs and any NPU-equipped device
 - 20+ translation services including Google, Bing, DeepL, OpenAI, Gemini, DeepSeek, and Volcano Engine
 - Real-time LLM streaming translation with AI services
-- 'Multiple window modes: Main, Mini, and Fixed windows'
-- Global hotkeys for instant translation from any application
-- System tray integration for background operation
-- Clipboard monitoring with auto-translate
-- Dark and Light theme support following system settings
-- Text-to-Speech for source and translated text
-- HTTP proxy support for network configuration
-- Support for local LLM via Ollama
-- Custom OpenAI-compatible service support
-- High DPI and multi-monitor support
-- Mouse selection translation with floating pop button
 - 'OCR Screenshot Translation: Snipaste-style screen capture — select a region, OCR the text, and translate instantly using Windows OCR API'
 - 'Grammar Correction: AI-powered grammar correction with detailed explanations of errors'
 - 'Long Document Translation: Translate PDF, plain text, and Markdown files with ML-based layout detection, formula protection, parallel processing, and bilingual export'
 - 'MDX Dictionary: Import MDict (.mdx) dictionary files for offline word lookups with rich HTML rendering'
+- Global hotkeys for instant translation from any application
+- Mouse selection translation with floating pop button
+- System tray integration for background operation
+- Dark and Light theme support following system settings
+- Text-to-Speech for source and translated text
+- Custom OpenAI-compatible service support
+- High DPI and multi-monitor support
 keywords:
 - translate
 - translation

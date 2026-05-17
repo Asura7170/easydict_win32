@@ -898,4 +898,292 @@
   <data name="ExcludedApps" xml:space="preserve"><value>แอปที่ยกเว้น</value></data>
   <data name="ExcludedAppsPlaceholder" xml:space="preserve"><value>code, slack, discord</value></data>
   <data name="ExcludedAppsDescription" xml:space="preserve"><value>ชื่อโปรเซสที่ต้องการยกเว้นจากการแปลเมื่อเลือกข้อความ คั่นด้วยเครื่องหมายจุลภาค ตัวอย่าง: "code" สำหรับ VS Code</value></data>
+
+  <!-- Windows AI provider selection -->
+  <data name="LocalAI_Title" xml:space="preserve"><value>Windows Local AI</value></data>
+  <data name="LocalAI_ProviderLabel" xml:space="preserve"><value>ผู้ให้บริการ</value></data>
+  <data name="LocalAI_ProviderAutomationName" xml:space="preserve"><value>ผู้ให้บริการ Windows Local AI</value></data>
+  <data name="LocalAI_Provider_Auto" xml:space="preserve"><value>Auto (Phi Silica → Foundry Local → OpenVINO)</value></data>
+  <data name="LocalAI_Provider_WindowsAI" xml:space="preserve"><value>Phi Silica (Copilot+ PC)</value></data>
+  <data name="LocalAI_Provider_OpenVINO" xml:space="preserve"><value>OpenVINO (NLLB-200, local)</value></data>
+  <data name="LocalAI_Rating_WindowsAI" xml:space="preserve"><value>★★★★★</value></data>
+  <data name="LocalAI_Rating_WindowsAI_Tooltip" xml:space="preserve"><value>Best quality when available. Uses Phi Silica on supported Copilot+ PCs.</value></data>
+  <data name="LocalAI_Rating_FoundryLocal" xml:space="preserve"><value>★★★★</value></data>
+  <data name="LocalAI_Rating_FoundryLocal_Tooltip" xml:space="preserve"><value>Good local LLM fallback. Requires Foundry Local and a loaded model.</value></data>
+  <data name="LocalAI_Rating_OpenVINO" xml:space="preserve"><value>★★</value></data>
+  <data name="LocalAI_Rating_OpenVINO_Tooltip" xml:space="preserve"><value>Basic offline translation fallback. Hardware acceleration is best effort.</value></data>
+  <data name="LocalAI_Description" xml:space="preserve"><value>Auto tries Phi Silica first, then Foundry Local, then OpenVINO/NLLB as the local translation fallback. No cloud API key.</value></data>
+  <data name="LocalAI_Description_Auto" xml:space="preserve"><value>Auto tries Phi Silica first, then Foundry Local, then OpenVINO/NLLB as the local translation fallback. No cloud API key.</value></data>
+  <data name="LocalAI_Description_WindowsAI" xml:space="preserve"><value>ใช้ Phi Silica บน Copilot+ PC ผ่าน Windows AI API ไม่ต้องใช้คีย์ API หรือเครือข่าย</value></data>
+  <data name="LocalAI_Description_OpenVINO" xml:space="preserve"><value>Runs NLLB-200 locally with ONNX Runtime + OpenVINO. Hardware acceleration is best effort; unsupported graph parts fall back to CPU. No API key, no network.</value></data>
+  <data name="LocalAI_WindowsAISectionTitle" xml:space="preserve"><value>Phi Silica</value></data>
+  <data name="OpenVINO_ConfigTitle" xml:space="preserve"><value>OpenVINO (local NLLB)</value></data>
+  <data name="OpenVINO_ConfigDescription" xml:space="preserve"><value>Runs NLLB-200 locally with ONNX Runtime + OpenVINO. Hardware acceleration is best effort and falls back to CPU when needed.</value></data>
+
+  <data name="FoundryLocal_ConfigDescription" xml:space="preserve"><value>Leave endpoint empty to auto-detect it from foundry service status; set it manually if the local service uses a fixed OpenAI-compatible endpoint.</value></data>
+  <data name="FoundryLocal_InstallLinkText" xml:space="preserve"><value>Install Foundry Local</value></data>
+  <data name="FoundryLocal_DocsLinkText" xml:space="preserve"><value>Install/use docs</value></data>
+  <data name="FoundryLocal_StartButton" xml:space="preserve"><value>Start Foundry Local</value></data>
+  <data name="FoundryLocal_Title_Ready" xml:space="preserve"><value>Foundry Local ready</value></data>
+  <data name="FoundryLocal_Title_Unavailable" xml:space="preserve"><value>Foundry Local unavailable</value></data>
+  <data name="FoundryLocal_Status_Checking" xml:space="preserve"><value>Checking Foundry Local status...</value></data>
+  <data name="FoundryLocal_Status_NotInstalled" xml:space="preserve"><value>Foundry Local CLI is not installed or is not available on PATH.</value></data>
+  <data name="FoundryLocal_Status_NotRunning" xml:space="preserve"><value>Foundry Local is not running. Start the Foundry Local service or set the endpoint manually.</value></data>
+  <data name="FoundryLocal_Status_Starting" xml:space="preserve"><value>Starting Foundry Local service...</value></data>
+  <data name="FoundryLocal_Status_LoadingModel" xml:space="preserve"><value>Loading the configured Foundry Local model...</value></data>
+  <data name="FoundryLocal_Status_StartFailed" xml:space="preserve"><value>Foundry Local could not be started.</value></data>
+  <data name="FoundryLocal_Status_Ready" xml:space="preserve"><value>Foundry Local is configured. The local endpoint will be used or auto-detected at runtime.</value></data>
+  <data name="FoundryLocal_EndpointLabel" xml:space="preserve"><value>Endpoint (optional)</value></data>
+  <data name="FoundryLocal_ConfigTitle" xml:space="preserve"><value>Foundry Local</value></data>
+  <data name="FoundryLocal_Status_NotConfigured" xml:space="preserve"><value>Foundry Local model is not configured.</value></data>
+  <data name="LocalAI_Description_FoundryLocal" xml:space="preserve"><value>Runs local models through the Microsoft Foundry Local OpenAI-compatible endpoint. Requires Foundry Local installed and a local model available.</value></data>
+  <data name="FoundryLocal_EndpointPlaceholder" xml:space="preserve"><value>Auto-detect from foundry service status</value></data>
+  <data name="FoundryLocal_ModelLabel" xml:space="preserve"><value>Model</value></data>
+  <data name="LocalAI_Provider_FoundryLocal" xml:space="preserve"><value>Foundry Local</value></data>
+  <data name="PhiSilicaModelPrompt_Title" xml:space="preserve"><value>ดาวน์โหลดโมเดล Phi Silica หรือไม่</value></data>
+  <data name="PhiSilicaModelPrompt_Message" xml:space="preserve"><value>Phi Silica needs to download and prepare Windows-managed on-device language model components before first use. Expect a several-GB install; the exact size depends on your device and Windows version. You can download it now, skip this translation, or disable Phi Silica until you turn it back on in Settings.</value></data>
+  <data name="PhiSilicaModelPrompt_DownloadNow" xml:space="preserve"><value>ดาวน์โหลดตอนนี้</value></data>
+  <data name="PhiSilicaModelPrompt_NotNow" xml:space="preserve"><value>ยังไม่ใช่ตอนนี้</value></data>
+  <data name="PhiSilicaModelPrompt_Disable" xml:space="preserve"><value>ปิดใช้งาน Phi Silica</value></data>
+  <!-- Windows AI (Phi Silica) -->
+  <data name="WindowsLocalAI_Title_Ready" xml:space="preserve"><value>พร้อม</value></data>
+  <data name="WindowsLocalAI_Title_Unavailable" xml:space="preserve"><value>ไม่พร้อมใช้งาน</value></data>
+  <data name="WindowsLocalAI_Preparing" xml:space="preserve"><value>กำลังเตรียมการ…</value></data>
+  <data name="WindowsLocalAI_PrepareButton" xml:space="preserve"><value>Prepare model</value></data>
+  <data name="PhiSilicaPreparationProgress_Checking" xml:space="preserve"><value>Checking Phi Silica model status...</value></data>
+  <data name="PhiSilicaPreparationProgress_Requesting" xml:space="preserve"><value>Requesting model download and preparation from Windows...</value></data>
+  <data name="PhiSilicaPreparationProgress_Waiting" xml:space="preserve"><value>Windows is downloading or preparing the on-device model. This can be a several-GB install...</value></data>
+  <data name="PhiSilicaPreparationProgress_CreatingSession" xml:space="preserve"><value>Creating a Phi Silica model session...</value></data>
+  <data name="PhiSilicaPreparationProgress_WarmingUp" xml:space="preserve"><value>Running a short Phi Silica warm-up inference...</value></data>
+  <data name="PhiSilicaPreparationProgress_Finalizing" xml:space="preserve"><value>Finalizing model status...</value></data>
+  <data name="PhiSilicaPreparationProgress_ReusingExisting" xml:space="preserve"><value>Detected an existing Windows download. Continuing preparation and asking Windows to resume/reuse downloaded content when possible...</value></data>
+  <data name="PhiSilicaPreparationProgress_DeliveryOptimizationEstimate" xml:space="preserve"><value>Current package: {0}% ({1} of {2}), about {3} remaining. More Windows-managed components may follow.</value></data>
+  <data name="PhiSilicaPreparationProgress_TimeUnknown" xml:space="preserve"><value>unknown time</value></data>
+  <data name="PhiSilicaPreparationProgress_WindowsUpdateLink" xml:space="preserve"><value>Track download progress in Windows Update</value></data>
+  <data name="WindowsLocalAI_Status_Preparing" xml:space="preserve"><value>กำลังเตรียมโมเดลภาษาในอุปกรณ์…</value></data>
+  <data name="WindowsLocalAI_Status_WarmupRequired" xml:space="preserve"><value>The on-device language model package is ready, but Easydict needs to create a Phi Silica session and run a short warm-up before treating it as usable.</value></data>
+  <data name="WindowsLocalAI_Status_WarmingUp" xml:space="preserve"><value>Creating a Phi Silica session and running a short warm-up inference…</value></data>
+  <data name="WindowsLocalAI_Status_RuntimeUnhealthy" xml:space="preserve"><value>Phi Silica is installed, but the Windows AI runtime failed to create a usable model session. Auto mode will use Foundry Local or OpenVINO as fallback.</value></data>
+  <data name="WindowsLocalAI_Status_UnsupportedWindowsAIBaseline" xml:space="preserve"><value>Phi Silica is unavailable because this Windows installation does not appear to have a valid Windows AI baseline. This usually happens on unactivated, outdated, Insider, managed, or incomplete Copilot+ PC images where Windows Update cannot install AI Components. Activate Windows, install the latest cumulative update and AI Components, then verify Phi Silica in AI Dev Gallery.</value></data>
+  <data name="WindowsLocalAI_Status_Ready" xml:space="preserve"><value>โมเดลภาษาในอุปกรณ์พร้อมแล้ว การแปลทำงานในเครื่องโดยไม่ส่งข้อความไปยังบริการภายนอก</value></data>
+  <data name="WindowsLocalAI_Status_NotReady" xml:space="preserve"><value>The on-device language model is supported but has not been prepared yet. Click &quot;Prepare model&quot; to install it. Expect a several-GB Windows-managed install; the exact size depends on your device and Windows version.</value></data>
+  <data name="WindowsLocalAI_Status_CapabilityMissing" xml:space="preserve"><value>แพ็คเกจแอปไม่มีความสามารถ systemAIModels โดยทั่วไปจะมีผลกับเวอร์ชันพกพา/ไม่ได้แพ็คเกจ; โปรดติดตั้งเวอร์ชัน MSIX/Store แทน</value></data>
+  <data name="WindowsLocalAI_Status_NotCompatibleHardware" xml:space="preserve"><value>Phi Silica ต้องใช้ Copilot+ PC ที่มี NPU ที่เข้ากันได้ เลือก Auto หรือ OpenVINO ใน Windows Local AI เพื่อใช้ NLLB-200 fallback ในเครื่อง</value></data>
+  <data name="WindowsLocalAI_Status_OSUpdateNeeded" xml:space="preserve"><value>Windows AI ต้องการ Windows รุ่นใหม่กว่า ติดตั้งการอัปเดต Windows ล่าสุดและลองอีกครั้ง</value></data>
+  <data name="WindowsLocalAI_Status_DisabledByUser" xml:space="preserve"><value>Windows AI ถูกปิดใช้งานหรือลบออก เปิดใช้งานคุณสมบัติ Windows AI ในการตั้งค่าระบบอีกครั้ง</value></data>
+  <data name="WindowsLocalAI_Status_NotSupported" xml:space="preserve"><value>Phi Silica ไม่พร้อมใช้งานบนระบบหรือภูมิภาคนี้ เลือก Auto หรือ OpenVINO ใน Windows Local AI เพื่อใช้ NLLB-200 fallback ในเครื่อง</value></data>
+  <data name="WindowsLocalAI_Status_PrepareFailed" xml:space="preserve"><value>การเตรียมโมเดลภาษาในอุปกรณ์ล้มเหลว ตรวจสอบ Windows Update และความพร้อมใช้งานของคุณสมบัติ AI แล้วลองอีกครั้ง</value></data>
+  <data name="WindowsLocalAI_Hint_ServiceDisabled" xml:space="preserve"><value>บริการอัปเดต/ดาวน์โหลด Windows ที่จำเป็นถูกปิดใช้งานหรือไม่สามารถเริ่มได้ เปิดใช้งาน Windows Update และ Delivery Optimization แล้วลองอีกครั้ง</value></data>
+  <data name="WindowsLocalAI_Hint_PackageResourceInUse" xml:space="preserve"><value>Windows ดาวน์โหลดแพ็คเกจโมเดลแล้วแต่ไม่สามารถติดตั้งให้เสร็จสมบูรณ์เนื่องจากแพ็คเกจหรือทรัพยากรที่เกี่ยวข้องกำลังถูกใช้งาน ปิด Easydict และแอป Windows AI อื่น ๆ หรือรีสตาร์ท Windows แล้วลองอีกครั้ง</value></data>
+  <data name="WindowsLocalAI_Hint_NpuRuntimeReset" xml:space="preserve"><value>Windows คืนค่าข้อผิดพลาดทั่วไปหลังจากที่โมเดลรายงานว่าพร้อม โดยปกติแล้วหมายความว่าเซสชันโมเดล Windows AI หรือการอนุมานครั้งแรกล้มเหลวหลังจากติดตั้งแพ็คเกจโมเดล ปิดแอป Windows AI อื่น ๆ และโปรเซสที่ใช้ทรัพยากรมาก รีสตาร์ท Windows เพื่อรีเซ็ตรันไทม์ NPU/โมเดล แล้วลองอีกครั้ง หากยังคงเกิดขึ้น ให้ใช้ Foundry Local หรือ OpenVINO เป็นทางเลือกสำรอง</value></data>
+  <data name="WindowsLocalAI_Hint_NpuModelSessionInit" xml:space="preserve"><value>Windows AI ดาวน์โหลดโมเดลแล้วแต่ล้มเหลวขณะเริ่มต้นเซสชันโมเดล Phi Silica หรือการอนุมานครั้งแรก ปิดแอป Windows AI อื่น ๆ และโปรเซสที่ใช้ทรัพยากรมาก รีสตาร์ท Windows เพื่อรีเซ็ตรันไทม์ NPU/โมเดล แล้วลองอีกครั้ง หากยังคงเกิดขึ้น ให้ใช้ Foundry Local หรือ OpenVINO เป็นทางเลือกสำรอง</value></data>
+
+  <!-- OpenVINO local NLLB (NLLB-200) -->
+  <data name="OpenVINO_Title_Ready" xml:space="preserve"><value>พร้อม</value></data>
+  <data name="OpenVINO_Title_Unavailable" xml:space="preserve"><value>ยังไม่ได้ดาวน์โหลด</value></data>
+  <data name="OpenVINO_Status_Ready" xml:space="preserve"><value>โมเดล NLLB-200 ติดตั้งและพร้อมแล้ว การแปลทำงานในอุปกรณ์ผ่าน ONNX Runtime + OpenVINO</value></data>
+  <data name="OpenVINO_Status_NotDownloaded" xml:space="preserve"><value>โมเดล NLLB-200 ยังไม่ได้ดาวน์โหลด (~360 MB) คลิก "ดาวน์โหลดโมเดล" เพื่อดึงไปยัง %LOCALAPPDATA%\Easydict\models</value></data>
+  <data name="OpenVINO_Status_Downloading" xml:space="preserve"><value>กำลังดาวน์โหลดไฟล์โมเดล NLLB-200…</value></data>
+  <data name="OpenVINO_Status_DownloadFailed" xml:space="preserve"><value>ดาวน์โหลดล้มเหลว ตรวจสอบการเชื่อมต่อเครือข่ายและลองอีกครั้ง</value></data>
+  <data name="LangClassicalChinese" xml:space="preserve">
+    <value>Classical Chinese</value>
+  </data>
+  <data name="LangDutch" xml:space="preserve">
+    <value>Dutch</value>
+  </data>
+  <data name="LangSwedish" xml:space="preserve">
+    <value>Swedish</value>
+  </data>
+  <data name="LangNorwegian" xml:space="preserve">
+    <value>Norwegian</value>
+  </data>
+  <data name="LangDanish" xml:space="preserve">
+    <value>Danish</value>
+  </data>
+  <data name="LangPortuguese" xml:space="preserve">
+    <value>Portuguese</value>
+  </data>
+  <data name="LangItalian" xml:space="preserve">
+    <value>Italian</value>
+  </data>
+  <data name="LangRomanian" xml:space="preserve">
+    <value>Romanian</value>
+  </data>
+  <data name="LangRussian" xml:space="preserve">
+    <value>Russian</value>
+  </data>
+  <data name="LangPolish" xml:space="preserve">
+    <value>Polish</value>
+  </data>
+  <data name="LangCzech" xml:space="preserve">
+    <value>Czech</value>
+  </data>
+  <data name="LangUkrainian" xml:space="preserve">
+    <value>Ukrainian</value>
+  </data>
+  <data name="LangBulgarian" xml:space="preserve">
+    <value>Bulgarian</value>
+  </data>
+  <data name="LangSlovak" xml:space="preserve">
+    <value>Slovak</value>
+  </data>
+  <data name="LangSlovenian" xml:space="preserve">
+    <value>Slovenian</value>
+  </data>
+  <data name="LangEstonian" xml:space="preserve">
+    <value>Estonian</value>
+  </data>
+  <data name="LangLatvian" xml:space="preserve">
+    <value>Latvian</value>
+  </data>
+  <data name="LangLithuanian" xml:space="preserve">
+    <value>Lithuanian</value>
+  </data>
+  <data name="LangGreek" xml:space="preserve">
+    <value>Greek</value>
+  </data>
+  <data name="LangHungarian" xml:space="preserve">
+    <value>Hungarian</value>
+  </data>
+  <data name="LangFinnish" xml:space="preserve">
+    <value>Finnish</value>
+  </data>
+  <data name="LangTurkish" xml:space="preserve">
+    <value>Turkish</value>
+  </data>
+  <data name="LangArabic" xml:space="preserve">
+    <value>Arabic</value>
+  </data>
+  <data name="LangPersian" xml:space="preserve">
+    <value>Persian</value>
+  </data>
+  <data name="LangHebrew" xml:space="preserve">
+    <value>Hebrew</value>
+  </data>
+  <data name="LangHindi" xml:space="preserve">
+    <value>Hindi</value>
+  </data>
+  <data name="LangBengali" xml:space="preserve">
+    <value>Bengali</value>
+  </data>
+  <data name="LangTamil" xml:space="preserve">
+    <value>Tamil</value>
+  </data>
+  <data name="LangTelugu" xml:space="preserve">
+    <value>Telugu</value>
+  </data>
+  <data name="LangUrdu" xml:space="preserve">
+    <value>Urdu</value>
+  </data>
+  <data name="LangVietnamese" xml:space="preserve">
+    <value>Vietnamese</value>
+  </data>
+  <data name="LangThai" xml:space="preserve">
+    <value>Thai</value>
+  </data>
+  <data name="LangIndonesian" xml:space="preserve">
+    <value>Indonesian</value>
+  </data>
+  <data name="LangMalay" xml:space="preserve">
+    <value>Malay</value>
+  </data>
+  <data name="LangFilipino" xml:space="preserve">
+    <value>Filipino</value>
+  </data>
+  <data name="AvailableLanguages" xml:space="preserve">
+    <value>Available Languages</value>
+  </data>
+  <data name="AvailableLanguagesDesc" xml:space="preserve">
+    <value>Select languages available in source/target pickers. At least 2 required.</value>
+  </data>
+  <data name="TrayTranslateClipboard" xml:space="preserve">
+    <value>Translate Clipboard</value>
+  </data>
+  <data name="TrayOcrTranslate" xml:space="preserve">
+    <value>OCR Translate</value>
+  </data>
+  <data name="ScreenCaptureExitConfirm" xml:space="preserve">
+    <value>Exit screenshot?</value>
+  </data>
+  <data name="ThemeMinimal" xml:space="preserve">
+    <value>Minimal</value>
+  </data>
+  <data name="LayoutDetection_Title" xml:space="preserve">
+    <value>Layout Detection</value>
+  </data>
+  <data name="LayoutDetection_Description" xml:space="preserve">
+    <value>ML-based layout detection for long document translation. Improves accuracy for academic papers with figures, tables, and formulas.</value>
+  </data>
+  <data name="LayoutDetection_Auto" xml:space="preserve">
+    <value>Auto (Recommended)</value>
+  </data>
+  <data name="LayoutDetection_OnnxLocal" xml:space="preserve">
+    <value>Local ONNX Model</value>
+  </data>
+  <data name="LayoutDetection_VisionLLM" xml:space="preserve">
+    <value>Vision LLM</value>
+  </data>
+  <data name="LayoutDetection_Heuristic" xml:space="preserve">
+    <value>Heuristic Only</value>
+  </data>
+  <data name="LayoutDetection_DownloadModel" xml:space="preserve">
+    <value>Download Model (~75MB)</value>
+  </data>
+  <data name="LayoutDetection_Downloaded" xml:space="preserve">
+    <value>ONNX Model: Ready</value>
+  </data>
+  <data name="LayoutDetection_NotDownloaded" xml:space="preserve">
+    <value>ONNX Model: Not Downloaded</value>
+  </data>
+  <data name="LayoutDetection_DownloadFailed" xml:space="preserve">
+    <value>Download Failed</value>
+  </data>
+  <data name="LayoutDetection_DetectionMode" xml:space="preserve">
+    <value>Detection Mode</value>
+  </data>
+  <data name="LayoutDetection_VisionService" xml:space="preserve">
+    <value>Vision Service</value>
+  </data>
+  <data name="MdxDictionaryReady" xml:space="preserve">
+    <value>This dictionary is ready to use. No configuration needed.</value>
+  </data>
+  <data name="MdxDeleteDictionary" xml:space="preserve">
+    <value>Delete Dictionary</value>
+  </data>
+  <data name="MdxRedetectEncryption" xml:space="preserve">
+    <value>Re-detect Encryption</value>
+  </data>
+  <data name="MdxDeleteConfirmTitle" xml:space="preserve">
+    <value>Delete Dictionary</value>
+  </data>
+  <data name="MdxDeleteConfirmMessage" xml:space="preserve">
+    <value>Are you sure you want to remove {0}? The dictionary file on disk will not be deleted.</value>
+  </data>
+  <data name="MdxFilePath" xml:space="preserve">
+    <value>File Path</value>
+  </data>
+  <data name="MdxRegistrationCode" xml:space="preserve">
+    <value>Registration Code</value>
+  </data>
+  <data name="MdxEncryptedHelpText" xml:space="preserve">
+    <value>This dictionary is encrypted. Enter the email and registration code used when purchasing this dictionary.</value>
+  </data>
+  <data name="MdxEmailPlaceholder" xml:space="preserve">
+    <value>Email address used for registration</value>
+  </data>
+  <data name="MddFilesDetected" xml:space="preserve">
+    <value>Imported '{0}' with {1} companion resource file(s).</value>
+  </data>
+  <data name="MddNoFilesDetected" xml:space="preserve">
+    <value>Imported '{0}'. No companion MDD resource files found.</value>
+  </data>
+  <data name="MddAddFile" xml:space="preserve">
+    <value>Add MDD File...</value>
+  </data>
+  <data name="MddRescanFiles" xml:space="preserve">
+    <value>Re-scan MDD Files</value>
+  </data>
+  <data name="MddAssociatedFiles" xml:space="preserve">
+    <value>Resource Files</value>
+  </data>
 </root>

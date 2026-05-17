@@ -1,6 +1,10 @@
 using System.Diagnostics;
+using Easydict.OpenVINO.Inference;
+using Easydict.OpenVINO.Services;
 using Easydict.TranslationService;
+using Easydict.TranslationService.LocalModels;
 using Easydict.TranslationService.Services;
+using Easydict.WindowsAI.Services;
 
 namespace Easydict.WinUI.Services;
 
@@ -22,6 +26,15 @@ public sealed class TranslationManagerService : IDisposable
     private readonly Dictionary<TranslationManager, int> _handleCounts = new();
     private readonly List<TranslationManager> _disposalQueue = new();
 
+    // Local AI providers are stateful: Phi Silica readiness is expensive to
+    // probe repeatedly, and OpenVINO lazy-loads ONNX sessions. Reuse instances
+    // across ConfigureServices/ReconfigureProxy so a warmed model isn't
+    // discarded when the user toggles unrelated settings.
+    private PhiSilicaTranslationService? _phiSilicaService;
+    private FoundryLocalService? _foundryLocalService;
+    private OpenVINOTranslationService? _openVinoService;
+    private LocalAITranslationService? _localAIService;
+
     public static TranslationManagerService Instance => _instance.Value;
 
     /// <summary>
@@ -37,6 +50,85 @@ public sealed class TranslationManagerService : IDisposable
                 return _translationManager;
             }
         }
+    }
+
+    internal OpenVINOTranslationService? OpenVinoService
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _openVinoService;
+            }
+        }
+    }
+
+    internal FoundryLocalService? FoundryLocalService
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _foundryLocalService;
+            }
+        }
+    }
+
+    public Task<LocalModelStatus> PrepareFoundryLocalAsync(CancellationToken cancellationToken)
+    {
+        FoundryLocalService? service;
+        lock (_lock)
+        {
+            _foundryLocalService ??= new FoundryLocalService(_translationManager.SharedHttpClient);
+            _foundryLocalService.Configure(_settings.FoundryLocalEndpoint, _settings.FoundryLocalModel);
+            service = _foundryLocalService;
+        }
+
+        return service.PrepareAsync(cancellationToken);
+    }
+
+    public Task<LocalModelStatus> PrepareFoundryLocalAsync(
+        string? endpoint,
+        string? model,
+        CancellationToken cancellationToken)
+    {
+        var service = CreateFoundryLocalProbeService(endpoint, model);
+        return service.PrepareAsync(cancellationToken);
+    }
+
+    public Task<LocalModelStatus> GetFoundryLocalStatusAsync(CancellationToken cancellationToken)
+    {
+        FoundryLocalService? service;
+        lock (_lock)
+        {
+            _foundryLocalService ??= new FoundryLocalService(_translationManager.SharedHttpClient);
+            _foundryLocalService.Configure(_settings.FoundryLocalEndpoint, _settings.FoundryLocalModel);
+            service = _foundryLocalService;
+        }
+
+        return service.CheckRuntimeStatusAsync(cancellationToken);
+    }
+
+    public Task<LocalModelStatus> GetFoundryLocalStatusAsync(
+        string? endpoint,
+        string? model,
+        CancellationToken cancellationToken)
+    {
+        var service = CreateFoundryLocalProbeService(endpoint, model);
+        return service.CheckRuntimeStatusAsync(cancellationToken);
+    }
+
+    private FoundryLocalService CreateFoundryLocalProbeService(string? endpoint, string? model)
+    {
+        HttpClient httpClient;
+        lock (_lock)
+        {
+            httpClient = _translationManager.SharedHttpClient;
+        }
+
+        var service = new FoundryLocalService(httpClient);
+        service.Configure(endpoint, model);
+        return service;
     }
 
     /// <summary>
@@ -182,6 +274,19 @@ public sealed class TranslationManagerService : IDisposable
                     _settings.OllamaModel);
             }
         });
+
+        // Local AI is exposed as one user-facing service. Auto mode tries
+        // Phi Silica first, then Foundry Local, then OpenVINO/NLLB as the
+        // hardware-accelerated translation fallback.
+        _phiSilicaService ??= new PhiSilicaTranslationService();
+        _foundryLocalService ??= new FoundryLocalService(_translationManager.SharedHttpClient);
+        _foundryLocalService.Configure(_settings.FoundryLocalEndpoint, _settings.FoundryLocalModel);
+        _openVinoService ??= new OpenVINOTranslationService();
+        _openVinoService.Configure(ParseOpenVinoDevice(_settings.OpenVinoDevice));
+        _localAIService ??= new LocalAITranslationService(_phiSilicaService, _foundryLocalService, _openVinoService);
+        _localAIService.Configure(LocalAIProviderModeExtensions.Parse(_settings.LocalAIProvider));
+        _translationManager.UnregisterService(LocalAITranslationService.LegacyOpenVinoServiceId);
+        _translationManager.RegisterService(_localAIService);
 
         // Configure BuiltIn AI
         _translationManager.ConfigureService("builtin", service =>
@@ -468,6 +573,12 @@ public sealed class TranslationManagerService : IDisposable
 
             oldManager = _translationManager;
             _translationManager = new TranslationManager(options);
+            _foundryLocalService = null;
+            // Unhook the wrapper's StatusChanged subscriptions before dropping
+            // the reference, otherwise the inner providers keep the old wrapper
+            // alive and double-forward events to the new instance.
+            _localAIService?.Dispose();
+            _localAIService = null;
             ConfigureServices();
 
             // Check if the old manager has active handles
@@ -572,8 +683,31 @@ public sealed class TranslationManagerService : IDisposable
 
     public void Dispose()
     {
+        // TranslationManager.Dispose() doesn't dispose registered services, and
+        // OpenVINOTranslationService owns native ORT sessions plus a SemaphoreSlim.
+        // Dispose it explicitly so we don't leak the warmed model on app shutdown.
+        _openVinoService?.Dispose();
+        _openVinoService = null;
+        // Unhook StatusChanged from the inner providers so the singleton
+        // PhiSilica/OpenVINO instances don't retain the disposed wrapper.
+        _localAIService?.Dispose();
+        _localAIService = null;
+        // FoundryLocalService isn't IDisposable but it caches a reference to
+        // _translationManager.SharedHttpClient. Null it for parity with the
+        // other provider fields so it can't be accidentally used after the
+        // manager (and its HttpClient) are disposed.
+        _foundryLocalService = null;
+        _phiSilicaService = null;
+
         _translationManager.Dispose();
         Debug.WriteLine("[TranslationManagerService] Disposed");
+    }
+
+    private static OpenVINODevice ParseOpenVinoDevice(string? value)
+    {
+        return Enum.TryParse<OpenVINODevice>(value, ignoreCase: true, out var parsed)
+            ? parsed
+            : OpenVINODevice.Auto;
     }
 
     private static void QueueMdxIndexBuild(

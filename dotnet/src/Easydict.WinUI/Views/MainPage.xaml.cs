@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Easydict.TranslationService;
 using Easydict.TranslationService.LongDocument;
+using Easydict.TranslationService.LocalModels;
 using Easydict.TranslationService.Models;
 using Easydict.TranslationService.Services;
 using Easydict.WinUI.Models;
@@ -72,6 +73,7 @@ namespace Easydict.WinUI.Views
         private string _lastStatusText = "Disconnected";
         private string _lastStatusSummaryText = string.Empty;
         private bool _lastStatusSummaryIsImportant;
+        private double? _localModelPreparationLastProgressPercent;
         private bool _suppressSuggestionTextChanged;
         private int _suggestionRequestId;
         private bool _isSuggestionNavigationActive;
@@ -136,22 +138,37 @@ namespace Easydict.WinUI.Views
             this.Loaded += OnPageLoaded;
             this.Unloaded += OnPageUnloaded;
             this.ActualThemeChanged += OnActualThemeChanged;
+            PhiSilicaModelPreparationCoordinator.Instance.ProgressChanged += OnPhiSilicaPreparationProgressChanged;
 
             // Sync selection between Wide and Narrow layout ComboBoxes
             SourceLangCombo.SelectionChanged += (s, e) =>
             {
+                var wasSuppressed = _suppressSourceLanguageSelectionChanged;
                 _suppressSourceLanguageSelectionChanged = true;
                 try { SyncComboSelection(SourceLangCombo, SourceLangComboNarrow); }
-                finally { _suppressSourceLanguageSelectionChanged = false; }
+                finally { _suppressSourceLanguageSelectionChanged = wasSuppressed; }
             };
             SourceLangComboNarrow.SelectionChanged += (s, e) =>
             {
+                var wasSuppressed = _suppressSourceLanguageSelectionChanged;
                 _suppressSourceLanguageSelectionChanged = true;
                 try { SyncComboSelection(SourceLangComboNarrow, SourceLangCombo); }
-                finally { _suppressSourceLanguageSelectionChanged = false; }
+                finally { _suppressSourceLanguageSelectionChanged = wasSuppressed; }
             };
-            TargetLangCombo.SelectionChanged += (s, e) => SyncComboSelection(TargetLangCombo, TargetLangComboNarrow);
-            TargetLangComboNarrow.SelectionChanged += (s, e) => SyncComboSelection(TargetLangComboNarrow, TargetLangCombo);
+            TargetLangCombo.SelectionChanged += (s, e) =>
+            {
+                var wasSuppressed = _suppressTargetLanguageSelectionChanged;
+                _suppressTargetLanguageSelectionChanged = true;
+                try { SyncComboSelection(TargetLangCombo, TargetLangComboNarrow); }
+                finally { _suppressTargetLanguageSelectionChanged = wasSuppressed; }
+            };
+            TargetLangComboNarrow.SelectionChanged += (s, e) =>
+            {
+                var wasSuppressed = _suppressTargetLanguageSelectionChanged;
+                _suppressTargetLanguageSelectionChanged = true;
+                try { SyncComboSelection(TargetLangComboNarrow, TargetLangCombo); }
+                finally { _suppressTargetLanguageSelectionChanged = wasSuppressed; }
+            };
             // Subscribe to clipboard events from App
             App.ClipboardTextReceived += OnClipboardTextReceived;
 
@@ -206,7 +223,7 @@ namespace Easydict.WinUI.Views
         private void OnPageLoaded(object sender, RoutedEventArgs e)
         {
 #if DEBUG
-            var loadBaseline = GC.GetTotalMemory(forceFullCollection: true);
+            var loadBaseline = MemoryDiagnostics.GetTotalMemoryForDiagnostics();
             MemoryDiagnostics.LogSnapshot("MainPage.OnPageLoaded");
             LogObjectState("OnPageLoaded begin");
 #endif
@@ -232,6 +249,7 @@ namespace Easydict.WinUI.Views
                 EnsureLongDocFeaturesInitialized();
             }
             ApplyThemeChrome();
+            SyncLocalModelPreparationProgressFromCoordinator();
 #if DEBUG
             MemoryDiagnostics.LogDelta("MainPage.OnPageLoaded retained after init", loadBaseline);
             MemoryDiagnostics.LogSnapshot("MainPage.OnPageLoaded complete");
@@ -553,6 +571,71 @@ namespace Easydict.WinUI.Views
                     : Visibility.Collapsed;
         }
 
+        private void ShowLocalModelPreparationProgress(string resourceKey)
+        {
+            ShowLocalModelPreparationProgress(
+                PhiSilicaModelPreparationCoordinator.Instance.CreatePreparingSnapshot(resourceKey));
+        }
+
+        private void ShowLocalModelPreparationProgress(PhiSilicaModelPreparationSnapshot snapshot)
+        {
+            LocalModelPreparationStatusText.Text = PhiSilicaModelPreparationProgressFormatter.FormatText(snapshot);
+            _localModelPreparationLastProgressPercent = PhiSilicaModelPreparationProgressFormatter.MergeProgressPercent(
+                _localModelPreparationLastProgressPercent,
+                snapshot.ProgressPercent);
+            if (_localModelPreparationLastProgressPercent is { } percent)
+            {
+                LocalModelPreparationProgressBar.IsIndeterminate = false;
+                LocalModelPreparationProgressBar.Value = percent;
+            }
+            else
+            {
+                LocalModelPreparationProgressBar.IsIndeterminate = true;
+            }
+            LocalModelPreparationProgressPanel.Visibility = Visibility.Visible;
+        }
+
+        private void HideLocalModelPreparationProgress()
+        {
+            LocalModelPreparationProgressPanel.Visibility = Visibility.Collapsed;
+            LocalModelPreparationStatusText.Text = string.Empty;
+            _localModelPreparationLastProgressPercent = null;
+        }
+
+        private void SyncLocalModelPreparationProgressFromCoordinator()
+        {
+            var snapshot = PhiSilicaModelPreparationCoordinator.Instance.CurrentSnapshot;
+            if (snapshot.IsPreparing)
+            {
+                ShowLocalModelPreparationProgress(snapshot);
+                return;
+            }
+
+            HideLocalModelPreparationProgress();
+        }
+
+        private void OnPhiSilicaPreparationProgressChanged(
+            object? sender,
+            PhiSilicaModelPreparationSnapshot snapshot)
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_isClosing || !_isLoaded)
+                {
+                    return;
+                }
+
+                if (snapshot.IsPreparing)
+                {
+                    ShowLocalModelPreparationProgress(snapshot);
+                }
+                else
+                {
+                    HideLocalModelPreparationProgress();
+                }
+            });
+        }
+
         private void ApplyTranslateButtonsChrome()
         {
             _translateButtonDefaultContent ??= TranslateButton.Content;
@@ -650,6 +733,7 @@ namespace Easydict.WinUI.Views
                 {
                     _isClosing = true;
                     this.ActualThemeChanged -= OnActualThemeChanged;
+                    PhiSilicaModelPreparationCoordinator.Instance.ProgressChanged -= OnPhiSilicaPreparationProgressChanged;
                     App.ClipboardTextReceived -= OnClipboardTextReceived;
                     await CleanupResourcesAsync();
                 }
@@ -670,6 +754,7 @@ namespace Easydict.WinUI.Views
             // With NavigationCacheMode="Enabled", this page instance persists and
             // is reused on GoBack. Don't dispose resources or unsubscribe events —
             // the constructor only runs once.
+            CancelTransientQueriesForNavigation();
 #if DEBUG
             MemoryDiagnostics.LogSnapshot("MainPage.OnPageUnloaded complete (A cached)");
             LogObjectState("OnPageUnloaded complete (A cached)");
@@ -688,7 +773,7 @@ namespace Easydict.WinUI.Views
             MemoryDiagnostics.LogSnapshot("MainPage.CleanupResourcesAsync begin");
             LogObjectState("CleanupResourcesAsync begin");
 #endif
-            CancelCurrentQuery();
+            CancelTransientQueriesForNavigation();
             ReleaseServiceResultControls();
             _longDocumentService?.Dispose();
             _longDocumentService = null;
@@ -702,11 +787,6 @@ namespace Easydict.WinUI.Views
             var queueCts = Interlocked.Exchange(ref _longDocQueueCts, null);
             try { queueCts?.Cancel(); } catch (ObjectDisposedException) { }
             queueCts?.Dispose();
-
-            // Cancel any in-flight manual queries.
-            // Disposal is still owned by OnServiceQueryRequested finally.
-            var manualCts = Interlocked.Exchange(ref _manualQueryCts, null);
-            try { manualCts?.Cancel(); } catch (ObjectDisposedException) { }
 
             var task = _currentQueryTask;
             var detectionService = _detectionService;
@@ -764,7 +844,7 @@ namespace Easydict.WinUI.Views
         private void ApplySettings()
         {
 #if DEBUG
-            var applySettingsBaseline = GC.GetTotalMemory(forceFullCollection: true);
+            var applySettingsBaseline = MemoryDiagnostics.GetTotalMemoryForDiagnostics();
             MemoryDiagnostics.LogSnapshot("MainPage.ApplySettings begin");
             LogObjectState("ApplySettings begin");
 #endif
@@ -835,6 +915,8 @@ namespace Easydict.WinUI.Views
 
             // Output placeholder
             PlaceholderText.Text = loc.GetString("TranslationPlaceholder");
+
+            SyncLocalModelPreparationProgressFromCoordinator();
 
             // Tooltips
             ToolTipService.SetToolTip(SettingsButton, loc.GetString("SettingsTooltip"));
@@ -1032,7 +1114,7 @@ namespace Easydict.WinUI.Views
         private void InitializeServiceResults(bool skipRebuildWhenDebugFlagSet = false, string reason = "Unspecified")
         {
 #if DEBUG
-            var initializeResultsBaseline = GC.GetTotalMemory(forceFullCollection: true);
+            var initializeResultsBaseline = MemoryDiagnostics.GetTotalMemoryForDiagnostics();
             MemoryDiagnostics.LogSnapshot("MainPage.InitializeServiceResults begin");
             LogObjectState($"InitializeServiceResults begin (reason={reason}, allowSkip={skipRebuildWhenDebugFlagSet})");
 #endif
@@ -1107,7 +1189,8 @@ namespace Easydict.WinUI.Views
                     ResultsPanel,
                     OnServiceCollapseToggled,
                     OnServiceQueryRequested,
-                    this);
+                    this,
+                    OnFoundryLocalStartRequested);
             }
 
             ReorderResultsPanel();
@@ -1136,7 +1219,8 @@ namespace Easydict.WinUI.Views
                 ResultsPanel,
                 OnServiceCollapseToggled,
                 OnServiceQueryRequested,
-                this);
+                this,
+                OnFoundryLocalStartRequested);
 
             ReorderResultsPanel();
         }
@@ -1152,7 +1236,8 @@ namespace Easydict.WinUI.Views
                 _resultControls,
                 ResultsPanel,
                 OnServiceCollapseToggled,
-                OnServiceQueryRequested);
+                OnServiceQueryRequested,
+                OnFoundryLocalStartRequested);
 
             if (clearResults)
             {
@@ -1261,6 +1346,11 @@ namespace Easydict.WinUI.Views
         /// </summary>
         private async void OnServiceQueryRequested(object? sender, ServiceQueryResult serviceResult)
         {
+            await OnServiceQueryRequestedAsync(sender, serviceResult);
+        }
+
+        private async Task OnServiceQueryRequestedAsync(object? sender, ServiceQueryResult serviceResult)
+        {
             if (_isClosing || _detectionService is null)
             {
                 return;
@@ -1278,13 +1368,39 @@ namespace Easydict.WinUI.Views
             var oldCts = Interlocked.Exchange(ref _manualQueryCts, cts);
             try { oldCts?.Cancel(); } catch (ObjectDisposedException) { }
 
-            // Mark as loading and queried
-            serviceResult.IsLoading = true;
-            serviceResult.MarkQueried();
-
             try
             {
                 var ct = cts.Token;
+
+                PhiSilicaModelPreparationPromptResult phiSilicaPromptResult;
+                try
+                {
+                    phiSilicaPromptResult = await PhiSilicaModelPreparationPromptService.PromptAndPrepareIfNeededAsync(
+                        [serviceResult],
+                        _settings,
+                        XamlRoot,
+                        ShowDialogAsync,
+                        ct,
+                        ShowLocalModelPreparationProgress);
+                }
+                finally
+                {
+                    SyncLocalModelPreparationProgressFromCoordinator();
+                }
+                if (phiSilicaPromptResult == PhiSilicaModelPreparationPromptResult.Disabled)
+                {
+                    InitializeServiceResults(reason: "PhiSilicaDisabled");
+                    return;
+                }
+
+                if (PhiSilicaModelPreparationPromptService.ShouldSkipServiceForCurrentQuery(serviceResult, phiSilicaPromptResult))
+                {
+                    return;
+                }
+
+                // Mark as loading and queried
+                serviceResult.IsLoading = true;
+                serviceResult.MarkQueried();
 
                 // Detect language (use cached if available from recent query)
                 var detectedLanguage = _lastDetectedLanguage != TranslationLanguage.Auto
@@ -1369,6 +1485,16 @@ namespace Easydict.WinUI.Views
                 Interlocked.CompareExchange(ref _manualQueryCts, null, cts);
                 cts.Dispose();
             }
+        }
+
+        private async void OnFoundryLocalStartRequested(object? sender, ServiceQueryResult serviceResult)
+        {
+            await FoundryLocalRecoveryCoordinator.StartAndRetryAsync(
+                serviceResult,
+                ct => TranslationManagerService.Instance.PrepareFoundryLocalAsync(ct),
+                (_, ct) => OnServiceQueryRequestedAsync(sender, serviceResult),
+                RefreshServiceResultView,
+                isAborted: () => _isClosing);
         }
 
         private void UpdateStatus(bool? connected, string text)
@@ -1587,6 +1713,30 @@ namespace Easydict.WinUI.Views
             try
             {
                 if (_isClosing) return;
+                PhiSilicaModelPreparationPromptResult phiSilicaPromptResult;
+                try
+                {
+                    phiSilicaPromptResult = await PhiSilicaModelPreparationPromptService.PromptAndPrepareIfNeededAsync(
+                        _serviceResults.Where(result => result.EnabledQuery),
+                        _settings,
+                        XamlRoot,
+                        ShowDialogAsync,
+                        ct,
+                        ShowLocalModelPreparationProgress);
+                }
+                finally
+                {
+                    SyncLocalModelPreparationProgressFromCoordinator();
+                }
+                if (phiSilicaPromptResult == PhiSilicaModelPreparationPromptResult.Disabled)
+                {
+                    InitializeServiceResults(reason: "PhiSilicaDisabled");
+                    if (!_serviceResults.Any(result => result.EnabledQuery))
+                    {
+                        return;
+                    }
+                }
+
                 SetLoading(true);
                 _hasAutoPlayedCurrentQuery = false;
 
@@ -1595,7 +1745,7 @@ namespace Easydict.WinUI.Views
                 {
                     result.Reset();
                     // Only set loading for auto-query services
-                    if (result.EnabledQuery)
+                    if (PhiSilicaModelPreparationPromptService.ShouldQueryServiceForCurrentQuery(result, phiSilicaPromptResult))
                     {
                         result.IsLoading = true;
                     }
@@ -1638,7 +1788,7 @@ namespace Easydict.WinUI.Views
                 var tasks = _serviceResults.Select(async serviceResult =>
                 {
                     // Skip manual-query services (EnabledQuery=false)
-                    if (!serviceResult.EnabledQuery)
+                    if (!PhiSilicaModelPreparationPromptService.ShouldQueryServiceForCurrentQuery(serviceResult, phiSilicaPromptResult))
                     {
                         return QueryExecutionOutcome.Cancelled;
                     }
@@ -2060,6 +2210,14 @@ namespace Easydict.WinUI.Views
 
             // Final update with complete result (apply same cleanup as non-streaming path)
             var finalText = CleanupStreamingResult(sb.ToString());
+            if (string.IsNullOrWhiteSpace(finalText))
+            {
+                throw new TranslationException("Streaming service returned an empty response")
+                {
+                    ErrorCode = TranslationErrorCode.InvalidResponse,
+                    ServiceId = serviceResult.ServiceId
+                };
+            }
 
             // Create initial result
             var result = new TranslationResult
@@ -2086,6 +2244,7 @@ namespace Easydict.WinUI.Views
             DispatcherQueue.TryEnqueue(() =>
             {
                 if (_isClosing) return;
+                serviceResult.IsLoading = false;
                 serviceResult.IsStreaming = false;
                 serviceResult.StreamingText = "";
                 serviceResult.Result = result;
@@ -2329,7 +2488,7 @@ namespace Easydict.WinUI.Views
         private void InitializeLongDocServices()
         {
 #if DEBUG
-            var initializeLongDocBaseline = GC.GetTotalMemory(forceFullCollection: true);
+            var initializeLongDocBaseline = MemoryDiagnostics.GetTotalMemoryForDiagnostics();
             MemoryDiagnostics.LogSnapshot("MainPage.InitializeLongDocServices begin");
             LogObjectState("InitializeLongDocServices begin");
 #endif
@@ -2338,9 +2497,9 @@ namespace Easydict.WinUI.Views
             var manager = TranslationManagerService.Instance.Manager;
             foreach (var service in manager.Services.Values.Where(IsLongDocSupportedService).OrderBy(s => s.DisplayName))
             {
-                var isReady = service.IsConfigured
-                    && _settings.ServiceTestStatus.TryGetValue(service.ServiceId, out var passed)
-                    && passed;
+                var isReady = LongDocumentServiceSupport.IsReadyForSelection(
+                    service,
+                    _settings.ServiceTestStatus);
 
                 var item = new ComboBoxItem
                 {
@@ -2370,12 +2529,7 @@ namespace Easydict.WinUI.Views
 
         private static bool IsLongDocSupportedService(ITranslationService service)
         {
-            // Built-in AI uses free proxy and is not stable enough for long document translation.
-            if (string.Equals(service.ServiceId, "builtin", StringComparison.OrdinalIgnoreCase))
-                return false;
-
-            // Long-document mode focuses on AI/LLM services similar to PDFMathTranslate style pipelines.
-            return service is IStreamTranslationService;
+            return LongDocumentServiceSupport.IsSupported(service);
         }
 
         private bool TryGetSelectedLongDocServiceId(out string serviceId)
@@ -3336,6 +3490,18 @@ namespace Easydict.WinUI.Views
                 // Ignore cancellation exceptions during cleanup
             }
             // Don't dispose - let the query's finally block dispose it
+        }
+
+        private void CancelTransientQueriesForNavigation()
+        {
+            CancelCurrentQuery();
+
+            // Disposal is still owned by OnServiceQueryRequested finally.
+            var manualCts = Interlocked.Exchange(ref _manualQueryCts, null);
+            try { manualCts?.Cancel(); } catch (ObjectDisposedException) { }
+
+            _suggestionDebounceTimer.Stop();
+            HideSuggestionPopup();
         }
 
         private void OnInputTextChanged(object sender, TextChangedEventArgs e)

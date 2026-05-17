@@ -10,9 +10,14 @@ using Easydict.TranslationService;
 using Easydict.TranslationService.Models;
 using Easydict.TranslationService.Services;
 using TranslationLanguage = Easydict.TranslationService.Models.Language;
+using Easydict.OpenVINO.Services;
+using Easydict.WindowsAI.Services;
 using Easydict.WinUI.Models;
 using Easydict.WinUI.Services;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace Easydict.WinUI.Views;
 
@@ -98,7 +103,31 @@ internal sealed class SettingsTabItem : INotifyPropertyChanged
 public sealed partial class SettingsPage : Page
 {
     private static readonly Regex NonServiceIdCharRegex = new("[^a-z0-9-]", RegexOptions.Compiled);
+    private const string ServiceConfigurationIconTag = "ServiceConfigurationIcon";
     private const string ReorderButtonEmoji = "\u2195\uFE0F";
+    private static readonly Dictionary<string, int> PreferredServiceDisplayOrder = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["bing"] = 0,
+        ["google"] = 10,
+        ["google_web"] = 20,
+        ["deepl"] = 30,
+        [LocalAITranslationService.ServiceIdValue] = 40,
+        ["ollama"] = 60,
+        ["openai"] = 70,
+        ["builtin"] = 80,
+        ["deepseek"] = 90,
+        ["zhipu"] = 100,
+        ["groq"] = 110,
+        ["gemini"] = 120,
+        ["github"] = 130,
+        ["custom-openai"] = 140,
+        ["doubao"] = 150,
+        ["caiyun"] = 160,
+        ["niutrans"] = 170,
+        ["youdao"] = 180,
+        ["volcano"] = 190,
+        ["linguee"] = 200
+    };
     private readonly SettingsService _settings = SettingsService.Instance;
     private bool _isLoading = true; // Prevent change detection during initial load
     private bool _isInitialized;
@@ -125,6 +154,7 @@ public sealed partial class SettingsPage : Page
 
     // Dynamic UI references for encrypted MDX dictionary credential fields
     private readonly Dictionary<string, (TextBox EmailBox, PasswordBox RegcodeBox)> _mdxCredentialFields = new();
+    private readonly List<(Image Icon, string IconName)> _serviceConfigurationHeaderIcons = [];
 
     private readonly ObservableCollection<SettingsTabItem> _settingsTabs =
     [
@@ -246,7 +276,8 @@ public sealed partial class SettingsPage : Page
         _ = Task.Run(async () =>
         {
             await Task.Delay(delayMs).ConfigureAwait(false);
-            var (liveInstances, survivingAfterFullGc, lastTrackedGen2Count) = GetTrackedInstanceCounts(forceFullCollection: true);
+            var (liveInstances, survivingAfterFullGc, lastTrackedGen2Count) =
+                GetTrackedInstanceCounts(MemoryDiagnostics.ForceFullGcForDiagnostics);
             var trackedInstanceAliveAfterDelayedFullGC = pageReference.TryGetTarget(out _);
             Debug.WriteLine(
                 $"[SettingsPage][Lifetime] #{instanceId} {label} | trackedInstanceAliveAfterDelayedFullGC={trackedInstanceAliveAfterDelayedFullGC} | liveInstances={liveInstances} | globalLiveInstances={liveInstances} | survivorsAfterDelayedFullGC={survivingAfterFullGc} | globalSurvivorsAfterDelayedFullGC={survivingAfterFullGc} | lastTrackedGen2={lastTrackedGen2Count}");
@@ -264,6 +295,7 @@ public sealed partial class SettingsPage : Page
 #endif
         this.InitializeComponent();
         ApplyThemeChrome();
+        InitializeServiceConfigurationHeaderIcons();
 #if DEBUG
         PerfLog("ctor: end InitializeComponent");
         MemoryDiagnostics.LogSnapshot("SettingsPage.ctor after InitializeComponent");
@@ -272,6 +304,115 @@ public sealed partial class SettingsPage : Page
         this.Loaded += OnPageLoaded;
         this.Unloaded += OnPageUnloaded;
         this.ActualThemeChanged += OnActualThemeChanged;
+    }
+
+    private void InitializeServiceConfigurationHeaderIcons()
+    {
+        _serviceConfigurationHeaderIcons.Clear();
+        foreach (var expander in ServiceConfigurationSection.Children.OfType<Expander>())
+        {
+            if (expander.Tag is string iconName && !string.IsNullOrWhiteSpace(iconName))
+            {
+                AddServiceConfigurationHeaderIcon(expander, iconName);
+            }
+        }
+
+        UpdateServiceConfigurationHeaderIconSources();
+    }
+
+    private void AddServiceConfigurationHeaderIcon(Expander expander, string iconName)
+    {
+        var icon = CreateServiceConfigurationHeaderIcon();
+        switch (expander.Header)
+        {
+            case Grid grid:
+                AddIconToHeaderGrid(grid, icon);
+                _serviceConfigurationHeaderIcons.Add((icon, iconName));
+                break;
+            case TextBlock title:
+                expander.Header = CreateServiceConfigurationHeaderGrid(icon, title);
+                _serviceConfigurationHeaderIcons.Add((icon, iconName));
+                break;
+        }
+    }
+
+    private static Image CreateServiceConfigurationHeaderIcon()
+    {
+        var icon = new Image
+        {
+            Width = 20,
+            Height = 20,
+            Margin = new Thickness(0, 0, 10, 0),
+            Stretch = Stretch.Uniform,
+            VerticalAlignment = VerticalAlignment.Center,
+            Tag = ServiceConfigurationIconTag
+        };
+        AutomationProperties.SetAccessibilityView(icon, AccessibilityView.Raw);
+        icon.ImageFailed += (_, _) => icon.Visibility = Visibility.Collapsed;
+        return icon;
+    }
+
+    private static void AddIconToHeaderGrid(Grid grid, Image icon)
+    {
+        if (grid.Children.OfType<Image>().Any(image => image.Tag as string == ServiceConfigurationIconTag))
+        {
+            return;
+        }
+
+        var existingChildren = grid.Children.ToList();
+        grid.HorizontalAlignment = HorizontalAlignment.Stretch;
+        grid.ColumnDefinitions.Clear();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        foreach (var child in existingChildren)
+        {
+            var isTrailingStatus = child is TextBlock textBlock
+                && textBlock.HorizontalAlignment == HorizontalAlignment.Right;
+            if (child is FrameworkElement element)
+            {
+                Grid.SetColumn(element, isTrailingStatus ? 2 : 1);
+                element.VerticalAlignment = VerticalAlignment.Center;
+            }
+        }
+
+        Grid.SetColumn(icon, 0);
+        grid.Children.Add(icon);
+    }
+
+    private static Grid CreateServiceConfigurationHeaderGrid(Image icon, TextBlock title)
+    {
+        var grid = new Grid
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var titleCopy = new TextBlock
+        {
+            Text = title.Text,
+            FontWeight = title.FontWeight,
+            FontSize = title.FontSize,
+            FontStyle = title.FontStyle,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        Grid.SetColumn(icon, 0);
+        Grid.SetColumn(titleCopy, 1);
+        grid.Children.Add(icon);
+        grid.Children.Add(titleCopy);
+        return grid;
+    }
+
+    private void UpdateServiceConfigurationHeaderIconSources()
+    {
+        foreach (var (icon, iconName) in _serviceConfigurationHeaderIcons)
+        {
+            icon.Visibility = Visibility.Visible;
+            icon.Source = new BitmapImage(ServiceIconAssetResolver.GetIconUri(iconName, ActualTheme));
+        }
     }
 
     public void ApplyThemeChrome()
@@ -283,6 +424,12 @@ public sealed partial class SettingsPage : Page
             LoadingOverlayRing.IsActive = !minimal;
             LoadingOverlayRing.Visibility = minimal ? Visibility.Collapsed : Visibility.Visible;
         }
+        if (NavigationLoadingRing is not null
+            && NavigationLoadingOverlay is { Visibility: Visibility.Visible })
+        {
+            NavigationLoadingRing.IsActive = true;
+            NavigationLoadingRing.Visibility = Visibility.Visible;
+        }
 
         foreach (var tab in _settingsTabs)
         {
@@ -292,6 +439,7 @@ public sealed partial class SettingsPage : Page
 
     private void OnActualThemeChanged(FrameworkElement sender, object args)
     {
+        UpdateServiceConfigurationHeaderIconSources();
         DispatcherQueue.TryEnqueue(ApplyThemeChrome);
     }
 
@@ -520,6 +668,70 @@ public sealed partial class SettingsPage : Page
         if (ServiceConfigurationDescriptionText != null)
             ServiceConfigurationDescriptionText.Text = loc.GetString("ServiceConfigurationDescription");
 
+        // Local AI configuration
+        if (WindowsLocalAITitleText != null)
+            WindowsLocalAITitleText.Text = loc.GetString(LocalAIResources.UiKeys.Title);
+        if (LocalAIProviderLabelText != null)
+            LocalAIProviderLabelText.Text = loc.GetString(LocalAIResources.UiKeys.ProviderLabel);
+        if (LocalAIProviderCombo != null)
+            AutomationProperties.SetName(LocalAIProviderCombo, loc.GetString(LocalAIResources.UiKeys.ProviderAutomationName));
+        if (LocalAIProviderAutoItem != null)
+            LocalAIProviderAutoItem.Content = loc.GetString(LocalAIResources.ProviderKeys.Auto);
+        if (LocalAIProviderWindowsAILabelText != null)
+            LocalAIProviderWindowsAILabelText.Text = loc.GetString(LocalAIResources.ProviderKeys.WindowsAI);
+        if (LocalAIProviderFoundryLocalLabelText != null)
+            LocalAIProviderFoundryLocalLabelText.Text = loc.GetString(LocalAIResources.ProviderKeys.FoundryLocal);
+        if (LocalAIProviderOpenVINOLabelText != null)
+            LocalAIProviderOpenVINOLabelText.Text = loc.GetString(LocalAIResources.ProviderKeys.OpenVINO);
+
+        var windowsAIRating = loc.GetString(LocalAIResources.RatingKeys.WindowsAI);
+        var windowsAIRatingTip = loc.GetString(LocalAIResources.RatingTooltipKeys.WindowsAI);
+        SetLocalAiRating(LocalAIProviderWindowsAIRatingText, windowsAIRating, windowsAIRatingTip);
+        SetLocalAiRating(WindowsLocalAISectionRatingText, windowsAIRating, windowsAIRatingTip);
+
+        var foundryLocalRating = loc.GetString(LocalAIResources.RatingKeys.FoundryLocal);
+        var foundryLocalRatingTip = loc.GetString(LocalAIResources.RatingTooltipKeys.FoundryLocal);
+        SetLocalAiRating(LocalAIProviderFoundryLocalRatingText, foundryLocalRating, foundryLocalRatingTip);
+        SetLocalAiRating(FoundryLocalRatingText, foundryLocalRating, foundryLocalRatingTip);
+
+        var openVinoRating = loc.GetString(LocalAIResources.RatingKeys.OpenVINO);
+        var openVinoRatingTip = loc.GetString(LocalAIResources.RatingTooltipKeys.OpenVINO);
+        SetLocalAiRating(LocalAIProviderOpenVINORatingText, openVinoRating, openVinoRatingTip);
+        SetLocalAiRating(OpenVinoRatingText, openVinoRating, openVinoRatingTip);
+        if (WindowsLocalAIDescriptionText != null)
+            UpdateLocalAIProviderDescription();
+        if (WindowsLocalAISectionTitleText != null)
+            WindowsLocalAISectionTitleText.Text = loc.GetString(LocalAIResources.UiKeys.WindowsAISectionTitle);
+        if (WindowsLocalAIPrepareButton != null)
+            WindowsLocalAIPrepareButton.Content = loc.GetString(PhiSilicaResources.UiKeys.PrepareButton);
+        if (WindowsLocalAIWindowsUpdateLink != null)
+        {
+            WindowsLocalAIWindowsUpdateLink.Content = loc.GetString(PhiSilicaResources.ProgressKeys.WindowsUpdateLink);
+            WindowsLocalAIWindowsUpdateLink.NavigateUri = new Uri("ms-settings:windowsupdate");
+        }
+        if (FoundryLocalTitleText != null)
+            FoundryLocalTitleText.Text = loc.GetString(FoundryLocalResources.UiKeys.ConfigTitle);
+        if (FoundryLocalEndpointBox != null)
+        {
+            FoundryLocalEndpointBox.Header = loc.GetString(FoundryLocalResources.UiKeys.EndpointLabel);
+            FoundryLocalEndpointBox.PlaceholderText = loc.GetString(FoundryLocalResources.UiKeys.EndpointPlaceholder);
+        }
+        if (FoundryLocalModelBox != null)
+            FoundryLocalModelBox.Header = loc.GetString(FoundryLocalResources.UiKeys.ModelLabel);
+        if (FoundryLocalStartButton != null)
+            FoundryLocalStartButton.Content = loc.GetString(FoundryLocalResources.UiKeys.StartButton);
+        if (FoundryLocalDescriptionText != null)
+            FoundryLocalDescriptionText.Text = loc.GetString(FoundryLocalResources.UiKeys.ConfigDescription);
+        if (FoundryLocalInstallLink != null)
+        {
+            FoundryLocalInstallLink.Content = loc.GetString(FoundryLocalResources.UiKeys.DocsLinkText);
+            FoundryLocalInstallLink.NavigateUri = new Uri(FoundryLocalResources.InstallDocumentationUrl);
+        }
+        if (OpenVinoTitleText != null)
+            OpenVinoTitleText.Text = loc.GetString(OpenVinoResources.UiKeys.ConfigTitle);
+        if (OpenVinoDescriptionText != null)
+            OpenVinoDescriptionText.Text = loc.GetString(OpenVinoResources.UiKeys.ConfigDescription);
+
         // Service configuration controls (API Keys, Endpoints, Models, etc.)
         // TextBox/PasswordBox headers for each service
         DeepLKeyBox.Header = loc.GetString("ApiKeyOptional");
@@ -713,6 +925,17 @@ public sealed partial class SettingsPage : Page
         ApplyLayoutDetectionLocalization(loc);
     }
 
+    private static void SetLocalAiRating(TextBlock? ratingText, string rating, string tooltip)
+    {
+        if (ratingText == null)
+        {
+            return;
+        }
+
+        ratingText.Text = rating;
+        ToolTipService.SetToolTip(ratingText, tooltip);
+    }
+
     private void ApplyTtsLocalization(LocalizationService loc)
     {
         TtsSettingsHeaderText.Text = loc.GetString("TtsSettingsHeader");
@@ -838,7 +1061,7 @@ public sealed partial class SettingsPage : Page
 
 #if DEBUG
         PerfLog("InitializeSettingsContent: begin");
-        var initializeBaseline = GC.GetTotalMemory(forceFullCollection: true);
+        var initializeBaseline = MemoryDiagnostics.GetTotalMemoryForDiagnostics();
         MemoryDiagnostics.LogSnapshot("SettingsPage.InitializeSettingsContent begin");
         LogObjectState("InitializeSettingsContent begin");
 #endif
@@ -997,13 +1220,15 @@ public sealed partial class SettingsPage : Page
 #if DEBUG
         LogDebugState("OnPageUnloaded before teardown");
         MemoryDiagnostics.LogSnapshot("SettingsPage.OnPageUnloaded (before teardown)");
-        var baseline = GC.GetTotalMemory(forceFullCollection: true);
+        var baseline = MemoryDiagnostics.GetTotalMemoryForDiagnostics();
 #endif
         TeardownOnUnload();
 #if DEBUG
         MemoryDiagnostics.LogDelta("SettingsPage.OnPageUnloaded retained after full GC", baseline);
         MemoryDiagnostics.LogSnapshot("SettingsPage.OnPageUnloaded (after teardown)");
-        LogDebugState("OnPageUnloaded after teardown", forceFullCollection: true);
+        LogDebugState(
+            "OnPageUnloaded after teardown",
+            forceFullCollection: MemoryDiagnostics.ForceFullGcForDiagnostics);
         ScheduleDelayedLifetimeCheck("OnPageUnloaded delayed full GC (250ms)", 250);
         ScheduleDelayedLifetimeCheck("OnPageUnloaded delayed full GC (1000ms)", 1000);
 #endif
@@ -1040,6 +1265,9 @@ public sealed partial class SettingsPage : Page
 
         UnregisterChangeHandlers();
         UnregisterLanguageCheckboxHandlers();
+        TeardownPhiSilicaPanel();
+        TeardownFoundryLocalPanel();
+        TeardownOpenVinoPanel();
 
         try { _currentDialog?.Hide(); } catch (COMException) { }
         _currentDialog = null;
@@ -1119,6 +1347,8 @@ public sealed partial class SettingsPage : Page
         OpenAIKeyBox.PasswordChanged += OnSettingChanged;
         OpenAIEndpointBox.TextChanged += OnSettingChanged;
         OllamaEndpointBox.TextChanged += OnSettingChanged;
+        FoundryLocalEndpointBox.TextChanged += OnSettingChanged;
+        FoundryLocalModelBox.TextChanged += OnSettingChanged;
         ProxyUriBox.TextChanged += OnSettingChanged;
         ShowHotkeyBox.TextChanged += OnSettingChanged;
         TranslateHotkeyBox.TextChanged += OnSettingChanged;
@@ -1210,6 +1440,8 @@ public sealed partial class SettingsPage : Page
         OpenAIKeyBox.PasswordChanged -= OnSettingChanged;
         OpenAIEndpointBox.TextChanged -= OnSettingChanged;
         OllamaEndpointBox.TextChanged -= OnSettingChanged;
+        FoundryLocalEndpointBox.TextChanged -= OnSettingChanged;
+        FoundryLocalModelBox.TextChanged -= OnSettingChanged;
         ProxyUriBox.TextChanged -= OnSettingChanged;
         ShowHotkeyBox.TextChanged -= OnSettingChanged;
         TranslateHotkeyBox.TextChanged -= OnSettingChanged;
@@ -1495,6 +1727,10 @@ public sealed partial class SettingsPage : Page
             OllamaEndpointBox.Text = _settings.OllamaEndpoint;
             OllamaModelCombo.Text = _settings.OllamaModel;
 
+            // Foundry Local settings
+            FoundryLocalEndpointBox.Text = _settings.FoundryLocalEndpoint;
+            FoundryLocalModelBox.Text = _settings.FoundryLocalModel;
+
             // Built-in AI settings
             SetEditableComboValue(BuiltInModelCombo, _settings.BuiltInAIModel);
             BuiltInApiKeyBox.Password = _settings.BuiltInAIApiKey ?? string.Empty;
@@ -1517,6 +1753,17 @@ public sealed partial class SettingsPage : Page
 
             // Restore test status indicators
             RestoreTestStatusIndicators();
+
+            InitializeLocalAIProviderCombo();
+
+            // Probe Windows AI (Phi Silica) availability and attach to any
+            // shared preparation task started from another surface.
+            InitializePhiSilicaPanel();
+            InitializeFoundryLocalPanel();
+
+            // Same for the OpenVINO local NLLB provider: read cache status and
+            // subscribe to status-change events for download progress.
+            InitializeOpenVinoPanel();
         }
 
         if (ShouldLoadSettingsTab(SettingsTabId.General, deferLazyTabData))
@@ -2194,6 +2441,7 @@ public sealed partial class SettingsPage : Page
             var ordered = managerOrder
                 .Select((id, idx) => (id, idx))
                 .OrderBy(t => orderIndex.TryGetValue(t.id, out var sortIdx) ? sortIdx : int.MaxValue)
+                .ThenBy(t => GetSettingsServiceDisplayOrder(t.id, t.idx))
                 .ThenBy(t => t.idx)
                 .Select(t => t.id);
 
@@ -2225,6 +2473,21 @@ public sealed partial class SettingsPage : Page
         {
             handle?.Dispose();
         }
+    }
+
+    internal static int GetSettingsServiceDisplayOrder(string serviceId, int registrationIndex)
+    {
+        if (PreferredServiceDisplayOrder.TryGetValue(serviceId, out var sortIndex))
+        {
+            return sortIndex;
+        }
+
+        if (serviceId.StartsWith("mdx::", StringComparison.OrdinalIgnoreCase))
+        {
+            return 1000 + registrationIndex;
+        }
+
+        return 2000 + registrationIndex;
     }
 
     private async void OnImportMdxDictionaryClicked(object sender, RoutedEventArgs e)
@@ -2441,12 +2704,18 @@ public sealed partial class SettingsPage : Page
 
             if (result == ContentDialogResult.Primary)
             {
+                await ShowNavigationLoadingOverlayAsync();
                 // Save and then go back
                 var saved = await SaveSettingsAsync();
-                if (!saved) return; // Validation failed, stay on page
+                if (!saved)
+                {
+                    HideNavigationLoadingOverlay();
+                    return; // Validation failed, stay on page
+                }
             }
             else if (result == ContentDialogResult.Secondary)
             {
+                await ShowNavigationLoadingOverlayAsync();
                 // Discard changes — restore SelectedLanguages to pre-edit snapshot
                 _settings.SelectedLanguages = _originalSelectedLanguages;
                 _hasUnsavedChanges = false;
@@ -2457,11 +2726,50 @@ public sealed partial class SettingsPage : Page
                 return;
             }
         }
+        else
+        {
+            await ShowNavigationLoadingOverlayAsync();
+        }
 
         if (Frame.CanGoBack)
         {
             Frame.GoBack();
         }
+        else
+        {
+            HideNavigationLoadingOverlay();
+        }
+    }
+
+    private async Task ShowNavigationLoadingOverlayAsync()
+    {
+        if (NavigationLoadingOverlay is null || NavigationLoadingRing is null)
+        {
+            return;
+        }
+
+        NavigationLoadingOverlay.Visibility = Visibility.Visible;
+        NavigationLoadingRing.IsActive = true;
+        NavigationLoadingRing.Visibility = Visibility.Visible;
+        BackButton.IsEnabled = false;
+        SaveButton.IsEnabled = false;
+        MainScrollViewer.IsEnabled = false;
+
+        await Task.Delay(50);
+    }
+
+    private void HideNavigationLoadingOverlay()
+    {
+        if (NavigationLoadingOverlay is null || NavigationLoadingRing is null)
+        {
+            return;
+        }
+
+        NavigationLoadingRing.IsActive = false;
+        NavigationLoadingOverlay.Visibility = Visibility.Collapsed;
+        BackButton.IsEnabled = true;
+        SaveButton.IsEnabled = true;
+        MainScrollViewer.IsEnabled = true;
     }
 
     private async void OnSaveClick(object sender, RoutedEventArgs e)
@@ -2614,6 +2922,12 @@ public sealed partial class SettingsPage : Page
             ? "http://localhost:11434/v1/chat/completions"
             : ollamaEndpoint;
         _settings.OllamaModel = OllamaModelCombo.Text?.Trim() ?? "llama3.2";
+        _settings.LocalAIProvider = GetSelectedTag(LocalAIProviderCombo) ?? "Auto";
+        _settings.FoundryLocalEndpoint = FoundryLocalEndpointBox.Text?.Trim() ?? "";
+        var foundryLocalModel = FoundryLocalModelBox.Text?.Trim();
+        _settings.FoundryLocalModel = string.IsNullOrWhiteSpace(foundryLocalModel)
+            ? FoundryLocalService.DefaultModel
+            : foundryLocalModel;
 
         // Save OCR Engine settings
         var ocrOptions = GetCurrentOcrServiceOptions();

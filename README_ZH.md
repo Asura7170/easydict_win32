@@ -40,6 +40,8 @@
 
 这是 [Easydict](https://github.com/tisfeng/Easydict) 的 Windows 移植版本，原版是一款 macOS 翻译词典应用。本项目使用 **Vibe Coding** — AI 辅助编程，将 Swift/SwiftUI 代码库迁移到 .NET + WinUI 3。
 
+Easydict 支持 **Copilot+ PC 增强型本地 AI 翻译**：在搭载 40+ TOPS NPU 的 Copilot+ PC 上，翻译通过 Phi Silica 在设备端运行，快速且私密。普通 Windows PC 支持 Foundry Local，OpenVINO NLLB-200 作为离线兜底 — 所有 Windows 设备上的标准翻译服务仍然完全可用。
+
 虽然功能尚未完全对齐 macOS 版本，但此移植版填补了 Windows 用户对便捷翻译工具的需求，支持全局快捷键和多种翻译服务。
 
 <p align="right"><a href="#目录">回到顶部</a></p>
@@ -72,6 +74,8 @@
 <p align="right"><a href="#目录">回到顶部</a></p>
 
 ## 功能
+
+- **Copilot+ PC 增强型本地 AI 翻译** - Windows Local AI 在设备端运行：搭载 40+ TOPS NPU 的 Copilot+ PC 上通过 Phi Silica 进行 NPU 加速翻译，普通 Windows PC 上使用 Foundry Local，OpenVINO NLLB-200 作为离线兜底。自动模式会选择最佳可用提供方；所有 Windows 设备上的标准云端翻译服务仍然完全可用。
 
 - **OCR 截图翻译** - 类似 Snipaste 的截图体验：按 `Ctrl+Alt+S` 截取屏幕区域，自动检测窗口或拖拽选择区域，然后 OCR 识别文字并翻译。使用 Windows OCR API，支持配置识别语言。还支持静默 OCR（`Ctrl+Alt+Shift+S`），将识别文字复制到剪贴板而不翻译。
 
@@ -120,7 +124,7 @@
 
 - **高 DPI 支持** - Per-Monitor V2 DPI 感知
 
-- **多种翻译服务**（19 种服务）
+- **多种翻译服务**（20 种服务）
   - Google 翻译（免费，无需 API Key）
   - Google 词典（丰富词典：音标、释义、例句）
   - 必应翻译（免费，无需 API Key）
@@ -138,6 +142,7 @@
   - 小牛翻译（450+ 语种，支持繁体中文）
   - Linguee 词典（带上下文例句）
   - Ollama（本地 LLM，默认：llama3.2）
+  - Windows Local AI（Copilot+ PC 上使用 Phi Silica，OpenVINO 回退）
   - 内置 AI（免费，由 Groq 提供）
   - 自定义 OpenAI 兼容服务
 
@@ -284,7 +289,7 @@ dotnet run --project src/Easydict.WinUI/Easydict.WinUI.csproj
 
 | 功能 | macOS | Windows |
 |------|-------|---------|
-| 翻译服务 | 25+ | 19 |
+| 翻译服务 | 25+ | 20 |
 | OCR 截图翻译 | 支持 | 支持 |
 | TTS | 支持 | 支持 |
 | 划词翻译 | 支持 | 支持 |

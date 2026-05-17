@@ -6,7 +6,8 @@ param(
     [string]$Configuration = "Release",
     [string]$Platform = "x64",
     [string]$CertPath = ".\certs\dev-signing.pfx",
-    [string]$CertPassword = $(if ($env:CERT_PASSWORD) { $env:CERT_PASSWORD } else { "password" })
+    [string]$CertPassword = $(if ($env:CERT_PASSWORD) { $env:CERT_PASSWORD } else { "password" }),
+    [switch]$SkipInstall
 )
 
 $ErrorActionPreference = "Stop"
@@ -100,7 +101,12 @@ try {
     try {
         $manifestContent = Get-Content $manifestPath -Raw
         $manifestContent = $manifestContent -replace 'ProcessorArchitecture="[^"]*"', "ProcessorArchitecture=`"$Platform`""
-        $manifestContent = $manifestContent -replace 'Version="[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"', "Version=`"$msixVersion`""
+        # Anchor the rewrite to the <Identity> element so unrelated Version-bearing
+        # attributes elsewhere in the manifest aren't clobbered. A previous
+        # `(?<!Min)Version="..."` only excluded `MinVersion`, but still matched
+        # `MaxVersionTested="..."` (the lookbehind sees `x`, not `Min`) — which
+        # would rewrite the Windows AI capability gate to the app version.
+        $manifestContent = $manifestContent -replace '(<Identity\b[^>]*?\sVersion=")[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(")', "`${1}$msixVersion`${2}"
         Set-Content $tempManifest $manifestContent
 
         winapp package $publishDir --output $msixPath --manifest $tempManifest --skip-pri --verbose
@@ -124,6 +130,13 @@ try {
     Write-Host ""
 
     # Step 6: Reinstall
+    if ($SkipInstall) {
+        Write-Host "[6/6] Skipping local install (-SkipInstall)" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "=== Build Complete ===" -ForegroundColor Cyan
+        Write-Host "Signed MSIX: $msixPath" -ForegroundColor White
+        return
+    }
     Write-Host "[6/6] Reinstalling app..." -ForegroundColor Yellow
 
     # Remove existing installation

@@ -40,6 +40,8 @@
 
 This is a Windows port of [Easydict](https://github.com/tisfeng/Easydict), originally a macOS translation dictionary app. The project was developed using **Vibe Coding** - AI-assisted programming to migrate the Swift/SwiftUI codebase to .NET + WinUI 3.
 
+Easydict supports **Copilot+ PC enhanced local AI translation**: on supported Copilot+ PCs with a 40+ TOPS NPU, translations run on-device via Phi Silica for fast, private output. Foundry Local is supported on regular Windows PCs, with OpenVINO NLLB-200 as an offline fallback — standard translation services remain fully available on every Windows device.
+
 While the feature set is not yet complete compared to the macOS version, this port fills the gap for Windows users who want a convenient translation tool with global hotkey support and multiple translation services.
 
 <p align="right"><a href="#table-of-contents">Back to Top</a></p>
@@ -72,6 +74,8 @@ While the feature set is not yet complete compared to the macOS version, this po
 <p align="right"><a href="#table-of-contents">Back to Top</a></p>
 
 ## Features
+
+- **Copilot+ PC Enhanced Local AI Translation** - Windows Local AI runs on-device with NPU acceleration via Phi Silica on supported Copilot+ PCs (40+ TOPS), Foundry Local on regular Windows PCs, or OpenVINO NLLB-200 as an offline fallback. Auto mode picks the best available provider; standard cloud translation services remain fully available everywhere.
 
 - **OCR Screenshot Translate** - Snipaste-style screen capture: press `Ctrl+Alt+S` to capture a screen region, auto-detect windows or drag to select, then OCR the text and translate. Uses Windows OCR API with configurable recognition language. Also supports silent OCR (`Ctrl+Alt+Shift+S`) that copies recognized text to clipboard without translating.
 
@@ -120,7 +124,7 @@ While the feature set is not yet complete compared to the macOS version, this po
 
 - **High DPI Support** - Per-Monitor V2 DPI awareness
 
-- **Multiple Translation Services** (19 services)
+- **Multiple Translation Services** (20 services)
   - Google Translate (free, no API key required)
   - Google Dict (rich dictionary: phonetics, definitions, examples)
   - Bing Translate (free, no API key required)
@@ -138,6 +142,7 @@ While the feature set is not yet complete compared to the macOS version, this po
   - NiuTrans (小牛翻译, 450+ languages, Traditional Chinese supported)
   - Linguee Dictionary (with context examples)
   - Ollama (local LLM, default: llama3.2)
+  - Windows Local AI (Phi Silica on Copilot+ PCs, OpenVINO fallback)
   - BuiltIn AI (free, powered by Groq)
   - Custom OpenAI-compatible services
 
@@ -284,7 +289,7 @@ dotnet run --project src/Easydict.WinUI/Easydict.WinUI.csproj
 
 | Feature | macOS | Windows |
 |---------|-------|---------|
-| Translation Services | 25+ | 19 |
+| Translation Services | 25+ | 20 |
 | OCR Screenshot Translation | Yes | Yes |
 | TTS | Yes | Yes |
 | Selection Translation | Yes | Yes |

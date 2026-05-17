@@ -240,7 +240,8 @@
 
                         <!-- DeepL -->
                         <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
+                                HorizontalContentAlignment="Stretch"
+                                Tag="DeepL">
                             <Expander.Header>
                                 <Grid>
                                     <TextBlock Text="DeepL"
@@ -275,9 +276,261 @@
                             </StackPanel>
                         </Expander>
 
+                        <!-- Windows Local AI (Phi Silica, Foundry Local, and OpenVINO fallback) -->
+                        <Expander x:Name="WindowsLocalAIExpander"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch"
+                                Tag="windows-local-ai">
+                            <Expander.Header>
+                                <Grid>
+                                    <TextBlock x:Name="WindowsLocalAITitleText"
+                                               Text="Windows Local AI"
+                                               FontWeight="SemiBold"
+                                               HorizontalAlignment="Left"/>
+                                    <TextBlock x:Name="WindowsLocalAIStatusBadge"
+                                               FontWeight="SemiBold"
+                                               HorizontalAlignment="Right"
+                                               Margin="0,0,8,0"
+                                               Visibility="Collapsed"/>
+                                </Grid>
+                            </Expander.Header>
+                            <StackPanel Spacing="12"
+                                    Padding="0,8">
+                                <StackPanel Spacing="6"
+                                            HorizontalAlignment="Left">
+                                    <TextBlock x:Name="LocalAIProviderLabelText"
+                                               Text="Provider"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                    <ComboBox x:Name="LocalAIProviderCombo"
+                                              AutomationProperties.Name="Windows Local AI Provider"
+                                              Width="520"
+                                              Height="40"
+                                              SelectionChanged="OnLocalAIProviderChanged">
+                                        <ComboBoxItem x:Name="LocalAIProviderAutoItem"
+                                                      Content="Auto (Phi Silica → Foundry Local → OpenVINO)"
+                                                      Tag="Auto"/>
+                                        <ComboBoxItem x:Name="LocalAIProviderWindowsAIItem"
+                                                      Tag="WindowsAI">
+                                            <StackPanel Orientation="Horizontal"
+                                                        Spacing="8">
+                                                <TextBlock x:Name="LocalAIProviderWindowsAILabelText"
+                                                           Text="Phi Silica (Copilot+ PC)"/>
+                                                <TextBlock x:Name="LocalAIProviderWindowsAIRatingText"
+                                                           Text="★★★★★"
+                                                           ToolTipService.ToolTip="Best quality when available."/>
+                                            </StackPanel>
+                                        </ComboBoxItem>
+                                        <ComboBoxItem x:Name="LocalAIProviderFoundryLocalItem"
+                                                      Tag="FoundryLocal">
+                                            <StackPanel Orientation="Horizontal"
+                                                        Spacing="8">
+                                                <TextBlock x:Name="LocalAIProviderFoundryLocalLabelText"
+                                                           Text="Foundry Local"/>
+                                                <TextBlock x:Name="LocalAIProviderFoundryLocalRatingText"
+                                                           Text="★★★★"
+                                                           ToolTipService.ToolTip="Good local LLM fallback."/>
+                                            </StackPanel>
+                                        </ComboBoxItem>
+                                        <ComboBoxItem x:Name="LocalAIProviderOpenVINOItem"
+                                                      Tag="OpenVINO">
+                                            <StackPanel Orientation="Horizontal"
+                                                        Spacing="8">
+                                                <TextBlock x:Name="LocalAIProviderOpenVINOLabelText"
+                                                           Text="OpenVINO (NLLB-200)"/>
+                                                <TextBlock x:Name="LocalAIProviderOpenVINORatingText"
+                                                           Text="★★"
+                                                           ToolTipService.ToolTip="Basic offline translation fallback."/>
+                                            </StackPanel>
+                                        </ComboBoxItem>
+                                    </ComboBox>
+                                </StackPanel>
+                                <TextBlock x:Name="WindowsLocalAIDescriptionText"
+                                           Text="Auto uses Phi Silica first, then Foundry Local, then OpenVINO/NLLB. No cloud API key."
+                                           FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
+                                <StackPanel x:Name="WindowsLocalAIConfigPanel"
+                                            Spacing="10">
+                                    <StackPanel Orientation="Horizontal"
+                                                Spacing="8">
+                                        <TextBlock x:Name="WindowsLocalAISectionTitleText"
+                                                   Text="Phi Silica"
+                                                   FontWeight="SemiBold"/>
+                                        <TextBlock x:Name="WindowsLocalAISectionRatingText"
+                                                   Text="★★★★★"
+                                                   ToolTipService.ToolTip="Best quality when available."/>
+                                    </StackPanel>
+                                    <InfoBar x:Name="WindowsLocalAIStatusBar"
+                                             IsOpen="True"
+                                             IsClosable="False"
+                                             Severity="Informational"
+                                             Title="Status"
+                                             Message=""/>
+                                    <Button x:Name="WindowsLocalAIPrepareButton"
+                                            Content="Prepare model"
+                                            Click="OnPreparePhiSilicaModel"
+                                            Padding="14,0"
+                                            Height="40"
+                                            HorizontalAlignment="Left"
+                                            Visibility="Collapsed"/>
+                                    <StackPanel x:Name="WindowsLocalAIPrepareProgressPanel"
+                                                Spacing="4"
+                                                Visibility="Collapsed">
+                                        <TextBlock x:Name="WindowsLocalAIPrepareProgressText"
+                                                   FontSize="12"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                   TextWrapping="Wrap"/>
+                                        <ProgressBar x:Name="WindowsLocalAIPrepareProgressBar"
+                                                     Height="4"
+                                                     IsIndeterminate="True"/>
+                                        <HyperlinkButton x:Name="WindowsLocalAIWindowsUpdateLink"
+                                                         Content="Track download progress in Windows Update"
+                                                         NavigateUri="ms-settings:windowsupdate"
+                                                         Padding="0"
+                                                         MinHeight="0"
+                                                         FontSize="12"
+                                                         HorizontalAlignment="Left"/>
+                                    </StackPanel>
+                                </StackPanel>
+                                <StackPanel x:Name="FoundryLocalConfigPanel"
+                                            Spacing="10">
+                                    <StackPanel Orientation="Horizontal"
+                                                Spacing="8">
+                                        <TextBlock x:Name="FoundryLocalTitleText"
+                                                   Text="Foundry Local"
+                                                   FontWeight="SemiBold"/>
+                                        <TextBlock x:Name="FoundryLocalRatingText"
+                                                   Text="★★★★"
+                                                   ToolTipService.ToolTip="Good local LLM fallback."/>
+                                    </StackPanel>
+                                    <TextBox x:Name="FoundryLocalEndpointBox"
+                                             Header="Endpoint (optional)"
+                                             PlaceholderText="Auto-detect from foundry service status"
+                                             TextWrapping="NoWrap"/>
+                                    <TextBox x:Name="FoundryLocalModelBox"
+                                             Header="Model"
+                                             Text="qwen2.5-0.5b"
+                                             TextWrapping="NoWrap"/>
+                                    <InfoBar x:Name="FoundryLocalStatusBar"
+                                             IsOpen="True"
+                                             IsClosable="False"
+                                             Severity="Informational"
+                                             Title="Status"
+                                             Message=""/>
+                                    <Button x:Name="FoundryLocalStartButton"
+                                            Content="Start Foundry Local"
+                                            Click="OnStartFoundryLocal"
+                                            Padding="14,0"
+                                            Height="40"
+                                            HorizontalAlignment="Left"
+                                            Visibility="Collapsed"/>
+                                    <TextBlock x:Name="FoundryLocalDescriptionText"
+                                               Text="Leave endpoint empty to auto-detect the local OpenAI-compatible endpoint."
+                                               FontSize="12"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               TextWrapping="Wrap"/>
+                                    <HyperlinkButton x:Name="FoundryLocalInstallLink"
+                                                     Content="Install Foundry Local"
+                                                     HorizontalAlignment="Left"
+                                                     Padding="0"/>
+                                </StackPanel>
+                                <StackPanel x:Name="OpenVinoConfigPanel"
+                                            Spacing="10">
+                                    <Grid>
+                                        <StackPanel Orientation="Horizontal"
+                                                    Spacing="8"
+                                                    HorizontalAlignment="Left">
+                                            <TextBlock x:Name="OpenVinoTitleText"
+                                                       Text="OpenVINO (local NLLB)"
+                                                       FontWeight="SemiBold"/>
+                                            <TextBlock x:Name="OpenVinoRatingText"
+                                                       Text="★★"
+                                                       ToolTipService.ToolTip="Basic offline translation fallback."/>
+                                        </StackPanel>
+                                        <TextBlock x:Name="OpenVinoStatusBadge"
+                                                   FontWeight="SemiBold"
+                                                   HorizontalAlignment="Right"
+                                                   Margin="0,0,8,0"
+                                                   Visibility="Collapsed"/>
+                                    </Grid>
+                                    <InfoBar x:Name="OpenVinoStatusBar"
+                                             IsOpen="True"
+                                             IsClosable="False"
+                                             Severity="Informational"
+                                             Title="Status"
+                                             Message=""/>
+                                    <ProgressBar x:Name="OpenVinoDownloadProgress"
+                                                 Minimum="0"
+                                                 Maximum="100"
+                                                 Visibility="Collapsed"/>
+                                    <Button x:Name="OpenVinoDownloadButton"
+                                            Content="Download model"
+                                            Click="OnDownloadOpenVinoModel"
+                                            Padding="14,0"
+                                            Height="40"
+                                            HorizontalAlignment="Left"
+                                            Visibility="Collapsed"/>
+                                    <TextBlock x:Name="OpenVinoDescriptionText"
+                                               Text="OpenVINO runs NLLB-200 locally with ONNX Runtime. Hardware acceleration is best effort and falls back to CPU when needed."
+                                               FontSize="12"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Ollama (Local) -->
+                        <Expander HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch"
+                                Tag="Ollama">
+                            <Expander.Header>
+                                <Grid>
+                                    <TextBlock Text="Ollama (Local LLM)"
+                                            FontWeight="SemiBold"
+                                            HorizontalAlignment="Left"/>
+                                    <TextBlock x:Name="OllamaStatusText"
+                                            Text="✓"
+                                            FontWeight="SemiBold"
+                                               Foreground="{ThemeResource SystemFillColorSuccessBrush}"
+                                            HorizontalAlignment="Right"
+                                            Margin="0,0,8,0"
+                                               Visibility="Collapsed"/>
+                                </Grid>
+                            </Expander.Header>
+                            <StackPanel Spacing="12"
+                                    Padding="0,8">
+                                <TextBox x:Name="OllamaEndpointBox"
+                                        Header="Endpoint"
+                                        Width="450"
+                                         PlaceholderText="http://localhost:11434/v1/chat/completions"
+                                        HorizontalAlignment="Left"/>
+                                <StackPanel Orientation="Horizontal"
+                                        Spacing="8">
+                                    <ComboBox x:Name="OllamaModelCombo"
+                                            Header="Model"
+                                            Width="200"
+                                            IsEditable="True"/>
+                                    <Button x:Name="RefreshOllamaButton"
+                                            Content="Refresh"
+                                            Click="OnRefreshOllamaModels"
+                                            VerticalAlignment="Bottom"
+                                            Padding="12,6"/>
+                                    <Button x:Name="TestOllamaButton"
+                                            Content="Test"
+                                            Click="OnTestOllama"
+                                            VerticalAlignment="Bottom"
+                                            Padding="8,4"/>
+                                </StackPanel>
+                                <TextBlock Text="Ollama must be running locally. Click Refresh to load available models."
+                                           FontSize="12"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            </StackPanel>
+                        </Expander>
+
                         <!-- OpenAI -->
                         <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
+                                HorizontalContentAlignment="Stretch"
+                                Tag="OpenAI">
                             <Expander.Header>
                                 <Grid>
                                     <TextBlock Text="OpenAI"
@@ -329,7 +582,8 @@
 
                         <!-- DeepSeek -->
                         <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
+                                HorizontalContentAlignment="Stretch"
+                                Tag="DeepSeek">
                             <Expander.Header>
                                 <Grid>
                                     <TextBlock Text="DeepSeek"
@@ -373,7 +627,8 @@
 
                         <!-- Groq -->
                         <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
+                                HorizontalContentAlignment="Stretch"
+                                Tag="Groq">
                             <Expander.Header>
                                 <Grid>
                                     <TextBlock Text="Groq"
@@ -419,7 +674,8 @@
 
                         <!-- Zhipu (智谱) -->
                         <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
+                                HorizontalContentAlignment="Stretch"
+                                Tag="Zhipu">
                             <Expander.Header>
                                 <Grid>
                                     <TextBlock Text="Zhipu (智谱)"
@@ -467,7 +723,8 @@
 
                         <!-- GitHub Models -->
                         <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
+                                HorizontalContentAlignment="Stretch"
+                                Tag="GitHub">
                             <Expander.Header>
                                 <Grid>
                                     <TextBlock Text="GitHub Models"
@@ -519,7 +776,8 @@
 
                         <!-- Gemini -->
                         <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
+                                HorizontalContentAlignment="Stretch"
+                                Tag="Gemini">
                             <Expander.Header>
                                 <Grid>
                                     <TextBlock Text="Gemini"
@@ -575,7 +833,8 @@
 
                         <!-- Custom OpenAI Compatible -->
                         <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
+                                HorizontalContentAlignment="Stretch"
+                                Tag="CustomOpenAI">
                             <Expander.Header>
                                 <Grid>
                                     <TextBlock Text="Custom OpenAI Compatible"
@@ -618,56 +877,10 @@
                             </StackPanel>
                         </Expander>
 
-                        <!-- Ollama (Local) -->
-                        <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
-                            <Expander.Header>
-                                <Grid>
-                                    <TextBlock Text="Ollama (Local LLM)"
-                                            FontWeight="SemiBold"
-                                            HorizontalAlignment="Left"/>
-                                    <TextBlock x:Name="OllamaStatusText"
-                                            Text="✓"
-                                            FontWeight="SemiBold"
-                                               Foreground="{ThemeResource SystemFillColorSuccessBrush}"
-                                            HorizontalAlignment="Right"
-                                            Margin="0,0,8,0"
-                                               Visibility="Collapsed"/>
-                                </Grid>
-                            </Expander.Header>
-                            <StackPanel Spacing="12"
-                                    Padding="0,8">
-                                <TextBox x:Name="OllamaEndpointBox"
-                                        Header="Endpoint"
-                                        Width="450"
-                                         PlaceholderText="http://localhost:11434/v1/chat/completions"
-                                        HorizontalAlignment="Left"/>
-                                <StackPanel Orientation="Horizontal"
-                                        Spacing="8">
-                                    <ComboBox x:Name="OllamaModelCombo"
-                                            Header="Model"
-                                            Width="200"
-                                            IsEditable="True"/>
-                                    <Button x:Name="RefreshOllamaButton"
-                                            Content="Refresh"
-                                            Click="OnRefreshOllamaModels"
-                                            VerticalAlignment="Bottom"
-                                            Padding="12,6"/>
-                                    <Button x:Name="TestOllamaButton"
-                                            Content="Test"
-                                            Click="OnTestOllama"
-                                            VerticalAlignment="Bottom"
-                                            Padding="8,4"/>
-                                </StackPanel>
-                                <TextBlock Text="Ollama must be running locally. Click Refresh to load available models."
-                                           FontSize="12"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                            </StackPanel>
-                        </Expander>
-
                         <!-- Built-in AI -->
                         <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
+                                HorizontalContentAlignment="Stretch"
+                                Tag="BuiltInAI">
                             <Expander.Header>
                                 <Grid>
                                     <TextBlock Text="Built-in AI"
@@ -722,7 +935,8 @@
 
                         <!-- Doubao (豆包) -->
                         <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
+                                HorizontalContentAlignment="Stretch"
+                                Tag="Doubao">
                             <Expander.Header>
                                 <Grid>
                                     <TextBlock Text="Doubao (豆包)"
@@ -767,7 +981,8 @@
 
                         <!-- Caiyun (彩云小译) -->
                         <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
+                                HorizontalContentAlignment="Stretch"
+                                Tag="Caiyun">
                             <Expander.Header>
                                 <Grid>
                                     <TextBlock Text="Caiyun (彩云小译)"
@@ -801,7 +1016,8 @@
 
                         <!-- NiuTrans (小牛翻译) -->
                         <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
+                                HorizontalContentAlignment="Stretch"
+                                Tag="NiuTrans">
                             <Expander.Header>
                                 <Grid>
                                     <TextBlock Text="NiuTrans (小牛翻译)"
@@ -836,7 +1052,8 @@
 
                         <!-- Youdao (有道翻译) -->
                         <Expander HorizontalAlignment="Stretch"
-                                HorizontalContentAlignment="Stretch">
+                                HorizontalContentAlignment="Stretch"
+                                Tag="Youdao">
                             <Expander.Header>
                                 <TextBlock Text="Youdao (有道翻译)"
                                         FontWeight="SemiBold"/>
@@ -872,6 +1089,31 @@
                                 <TextBlock x:Name="FreeServicesHeaderText"
                                         Text="Free Services (No Configuration Required)"
                                         FontWeight="SemiBold"/>
+                                <StackPanel Orientation="Horizontal"
+                                            Spacing="16">
+                                    <StackPanel Orientation="Horizontal"
+                                                Spacing="6">
+                                        <Image Width="18"
+                                               Height="18"
+                                               Source="ms-appx:///Assets/ServiceIcons/Google.png"
+                                               Stretch="Uniform"
+                                               VerticalAlignment="Center"
+                                               AutomationProperties.AccessibilityView="Raw"/>
+                                        <TextBlock Text="Google Translate"
+                                                   VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal"
+                                                Spacing="6">
+                                        <Image Width="18"
+                                               Height="18"
+                                               Source="ms-appx:///Assets/ServiceIcons/Linguee.png"
+                                               Stretch="Uniform"
+                                               VerticalAlignment="Center"
+                                               AutomationProperties.AccessibilityView="Raw"/>
+                                        <TextBlock Text="Linguee Dictionary"
+                                                   VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </StackPanel>
                                 <TextBlock x:Name="FreeServicesDescriptionText"
                                         Text="Google Translate and Linguee Dictionary work out of the box without API keys."
                                            FontSize="12"
@@ -1921,5 +2163,19 @@
                 <ThemeShadow/>
             </Button.Shadow>
         </Button>
+
+        <Grid x:Name="NavigationLoadingOverlay"
+              Visibility="Collapsed"
+              Canvas.ZIndex="100"
+              IsHitTestVisible="True">
+            <Border Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                    Opacity="0.72"/>
+            <ProgressRing x:Name="NavigationLoadingRing"
+                          IsActive="False"
+                          Width="36"
+                          Height="36"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"/>
+        </Grid>
     </Grid>
 </Page>

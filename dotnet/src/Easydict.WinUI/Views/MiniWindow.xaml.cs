@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Easydict.TranslationService;
+using Easydict.TranslationService.LocalModels;
 using Easydict.TranslationService.Models;
 using Easydict.TranslationService.Services;
 using Easydict.WinUI.Services;
@@ -439,7 +440,8 @@ public sealed partial class MiniWindow : Window
                 ResultsPanel,
                 OnServiceCollapseToggled,
                 OnServiceQueryRequested,
-                Content as FrameworkElement);
+                Content as FrameworkElement,
+                OnFoundryLocalStartRequested);
         }
 
         ReorderResultsPanel();
@@ -458,7 +460,8 @@ public sealed partial class MiniWindow : Window
             ResultsPanel,
             OnServiceCollapseToggled,
             OnServiceQueryRequested,
-            Content as FrameworkElement);
+            Content as FrameworkElement,
+            OnFoundryLocalStartRequested);
 
         ReorderResultsPanel();
         RequestResize();
@@ -470,7 +473,8 @@ public sealed partial class MiniWindow : Window
             _resultControls,
             ResultsPanel,
             OnServiceCollapseToggled,
-            OnServiceQueryRequested);
+            OnServiceQueryRequested,
+            OnFoundryLocalStartRequested);
 
         if (clearResults)
         {
@@ -492,6 +496,11 @@ public sealed partial class MiniWindow : Window
     /// </summary>
     private async void OnServiceQueryRequested(object? sender, ServiceQueryResult serviceResult)
     {
+        await OnServiceQueryRequestedAsync(sender, serviceResult);
+    }
+
+    private async Task OnServiceQueryRequestedAsync(object? sender, ServiceQueryResult serviceResult)
+    {
         if (_isClosing || _detectionService is null)
         {
             return;
@@ -509,13 +518,30 @@ public sealed partial class MiniWindow : Window
         var oldCts = Interlocked.Exchange(ref _manualQueryCts, cts);
         try { oldCts?.Cancel(); } catch (ObjectDisposedException) { }
 
-        // Mark as loading and queried
-        serviceResult.IsLoading = true;
-        serviceResult.MarkQueried();
-
         try
         {
             var ct = cts.Token;
+
+            var phiSilicaPromptResult = await PhiSilicaModelPreparationPromptService.PromptAndPrepareIfNeededAsync(
+                [serviceResult],
+                _settings,
+                (Content as FrameworkElement)?.XamlRoot,
+                async dialog => await dialog.ShowAsync(),
+                ct);
+            if (phiSilicaPromptResult == PhiSilicaModelPreparationPromptResult.Disabled)
+            {
+                InitializeServiceResults();
+                return;
+            }
+
+            if (PhiSilicaModelPreparationPromptService.ShouldSkipServiceForCurrentQuery(serviceResult, phiSilicaPromptResult))
+            {
+                return;
+            }
+
+            // Mark as loading and queried
+            serviceResult.IsLoading = true;
+            serviceResult.MarkQueried();
 
             // Detect language (use cached if available from recent query)
             // Run detection on thread pool to avoid blocking UI thread
@@ -600,6 +626,16 @@ public sealed partial class MiniWindow : Window
             Interlocked.CompareExchange(ref _manualQueryCts, null, cts);
             cts.Dispose();
         }
+    }
+
+    private async void OnFoundryLocalStartRequested(object? sender, ServiceQueryResult serviceResult)
+    {
+        await FoundryLocalRecoveryCoordinator.StartAndRetryAsync(
+            serviceResult,
+            ct => TranslationManagerService.Instance.PrepareFoundryLocalAsync(ct),
+            (_, ct) => OnServiceQueryRequestedAsync(sender, serviceResult),
+            _ => RequestResize(),
+            isAborted: () => _isClosing);
     }
 
     /// <summary>
@@ -946,6 +982,21 @@ public sealed partial class MiniWindow : Window
 
         try
         {
+            var phiSilicaPromptResult = await PhiSilicaModelPreparationPromptService.PromptAndPrepareIfNeededAsync(
+                _serviceResults.Where(result => result.EnabledQuery),
+                _settings,
+                (Content as FrameworkElement)?.XamlRoot,
+                async dialog => await dialog.ShowAsync(),
+                ct);
+            if (phiSilicaPromptResult == PhiSilicaModelPreparationPromptResult.Disabled)
+            {
+                InitializeServiceResults();
+                if (!_serviceResults.Any(result => result.EnabledQuery))
+                {
+                    return;
+                }
+            }
+
             SetLoading(true);
             _hasAutoPlayedCurrentQuery = false;
 
@@ -954,7 +1005,7 @@ public sealed partial class MiniWindow : Window
             {
                 result.Reset();
                 // Only set loading for auto-query services
-                if (result.EnabledQuery)
+                if (PhiSilicaModelPreparationPromptService.ShouldQueryServiceForCurrentQuery(result, phiSilicaPromptResult))
                 {
                     result.IsLoading = true;
                 }
@@ -1006,7 +1057,7 @@ public sealed partial class MiniWindow : Window
             var tasks = _serviceResults.Select(async serviceResult =>
             {
                 // Skip manual-query services (EnabledQuery=false)
-                if (!serviceResult.EnabledQuery)
+                if (!PhiSilicaModelPreparationPromptService.ShouldQueryServiceForCurrentQuery(serviceResult, phiSilicaPromptResult))
                 {
                     return QueryExecutionOutcome.Cancelled;
                 }
@@ -1388,6 +1439,14 @@ public sealed partial class MiniWindow : Window
 
         // Final update with complete result
         var finalText = sb.ToString().Trim();
+        if (string.IsNullOrWhiteSpace(finalText))
+        {
+            throw new TranslationException("Streaming service returned an empty response")
+            {
+                ErrorCode = TranslationErrorCode.InvalidResponse,
+                ServiceId = serviceResult.ServiceId
+            };
+        }
 
         // Create initial result
         var result = new TranslationResult
@@ -1414,6 +1473,7 @@ public sealed partial class MiniWindow : Window
         DispatcherQueue.TryEnqueue(() =>
         {
             if (_isClosing) return;
+            serviceResult.IsLoading = false;
             serviceResult.IsStreaming = false;
             serviceResult.StreamingText = "";
             serviceResult.Result = result;

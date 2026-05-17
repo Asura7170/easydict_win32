@@ -1,13 +1,75 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
-    <PropertyGroup>
-        <Version>0.7.5</Version>
-        <AssemblyVersion>0.7.5.0</AssemblyVersion>
-        <FileVersion>0.7.5.0</FileVersion>
+    <!-- Workaround for `Payload contains two or more files with the same destination path 'onnxruntime.dll'`.
+         Both Intel.ML.OnnxRuntime.OpenVino 1.21.0 (referenced via Easydict.OpenVINO, needed for the
+         OpenVINO EP that targets NPU) and Microsoft.Windows.AI.MachineLearning 2.0.300 (transitive
+         from Microsoft.WindowsAppSDK 2.x — Windows ML's own ORT build with DirectML EP) ship
+         runtimes/win-x64/native/onnxruntime.dll. AppX packaging refuses the duplicate destination.
+         We keep the Intel-shipped runtime (it has the OpenVINO EP we actually use) and drop the
+         Microsoft.Windows.AI.MachineLearning native asset via a sweep across every collection the
+         publish / AppX pipeline pulls files from. -->
+    <Target Name="DedupeOnnxRuntime"
+            AfterTargets="ResolveAssemblyReferences;ResolvePackageAssets;ResolveRuntimePackAssets;_ResolveCopyLocalAssetsForRuntimeDependencies"
+            BeforeTargets="_CopyFilesMarkedCopyLocal;ComputeFilesToPublish;_ComputeResolvedFilesToPublishTypes;_GetPackagingOutputs;GenerateAppxPackageRecipe">
+        <ItemGroup>
+            <ReferenceCopyLocalPaths
+                Remove="@(ReferenceCopyLocalPaths)"
+                Condition="'%(Filename)%(Extension)' == 'onnxruntime.dll' AND
+                           $([System.String]::Copy('%(FullPath)').ToLowerInvariant().Contains('microsoft.windows.ai.machinelearning'))" />
+            <ResolvedFileToPublish
+                Remove="@(ResolvedFileToPublish)"
+                Condition="'%(Filename)%(Extension)' == 'onnxruntime.dll' AND
+                           $([System.String]::Copy('%(FullPath)').ToLowerInvariant().Contains('microsoft.windows.ai.machinelearning'))" />
+            <RuntimeCopyLocalItems
+                Remove="@(RuntimeCopyLocalItems)"
+                Condition="'%(Filename)%(Extension)' == 'onnxruntime.dll' AND
+                           $([System.String]::Copy('%(FullPath)').ToLowerInvariant().Contains('microsoft.windows.ai.machinelearning'))" />
+            <RuntimeTargetsCopyLocalItems
+                Remove="@(RuntimeTargetsCopyLocalItems)"
+                Condition="'%(Filename)%(Extension)' == 'onnxruntime.dll' AND
+                           $([System.String]::Copy('%(FullPath)').ToLowerInvariant().Contains('microsoft.windows.ai.machinelearning'))" />
+            <NativeCopyLocalItems
+                Remove="@(NativeCopyLocalItems)"
+                Condition="'%(Filename)%(Extension)' == 'onnxruntime.dll' AND
+                           $([System.String]::Copy('%(FullPath)').ToLowerInvariant().Contains('microsoft.windows.ai.machinelearning'))" />
+            <_PackagingOutputs
+                Remove="@(_PackagingOutputs)"
+                Condition="'%(Filename)%(Extension)' == 'onnxruntime.dll' AND
+                           $([System.String]::Copy('%(FullPath)').ToLowerInvariant().Contains('microsoft.windows.ai.machinelearning'))" />
+            <PackagingOutputs
+                Remove="@(PackagingOutputs)"
+                Condition="'%(Filename)%(Extension)' == 'onnxruntime.dll' AND
+                           $([System.String]::Copy('%(FullPath)').ToLowerInvariant().Contains('microsoft.windows.ai.machinelearning'))" />
+        </ItemGroup>
+    </Target>
 
-        <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
-        <!-- MinVersion must be > 10.0.17134.0 for Windows Store submission -->
-        <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <ItemGroup>
+        <!-- Explicit reference matching the transitive WindowsAppSDK 2.x dependency
+             so we can attach ExcludeAssets metadata. ExcludeAssets="runtime;native"
+             tells NuGet to skip copying this package's native/runtime files to output,
+             leaving managed-API surface usable but dropping the conflicting onnxruntime.dll.
+             Version is pinned to the exact value WindowsAppSDK 2.0.1 resolves to
+             (observed in the duplicate-payload error: ".nuget/packages/microsoft.windows.ai.machinelearning/2.0.300/...").
+             A floating "2.0.*" was previously used but is non-reproducible: if a 2.0.301
+             ships with a different native-asset layout, the dedupe behavior could change
+             without any code edit. Bump this number in lockstep with WindowsAppSDK upgrades. -->
+        <PackageReference Include="Microsoft.Windows.AI.MachineLearning" Version="2.0.300">
+            <ExcludeAssets>runtime;native</ExcludeAssets>
+        </PackageReference>
+    </ItemGroup>
+
+    <PropertyGroup>
+        <Version>0.7.6</Version>
+        <AssemblyVersion>0.7.6.0</AssemblyVersion>
+        <FileVersion>0.7.6.0</FileVersion>
+
+        <!-- Bumped from 10.0.19041.0 to 10.0.22621.0 because Microsoft.Windows.AI.Text.LanguageModel
+             (Phi Silica) ships only in WindowsAppSDK 2.x, which requires a 22621 minimum. -->
+        <TargetFramework>net8.0-windows10.0.22621.0</TargetFramework>
+        <TargetPlatformMinVersion>10.0.22621.0</TargetPlatformMinVersion>
+        <!-- Pin manifest min/max version values so the SDK doesn't auto-rewrite TargetDeviceFamily. -->
+        <AppxOSMinVersionReplaceManifestVersion>false</AppxOSMinVersionReplaceManifestVersion>
+        <AppxOSMaxVersionTestedReplaceManifestVersion>false</AppxOSMaxVersionTestedReplaceManifestVersion>
         <OutputType>WinExe</OutputType>
 
         <!-- WinUI 3 -->
@@ -183,6 +245,14 @@
       <ProjectReference Include="..\Easydict.SidecarClient\Easydict.SidecarClient.csproj" />
       <ProjectReference Include="..\Easydict.TextLayout\Easydict.TextLayout.csproj" />
       <ProjectReference Include="..\Easydict.TranslationService\Easydict.TranslationService.csproj" />
+      <!-- Windows AI APIs / Phi Silica provider (windows-local-ai). Compile-only;
+           runtime availability is checked dynamically and the service degrades gracefully
+           on non-Copilot+ devices. -->
+      <ProjectReference Include="..\Easydict.WindowsAI\Easydict.WindowsAI.csproj" />
+      <!-- OpenVINO + NLLB-200 provider (openvino-local-ai). Targets Intel NPU/GPU/CPU
+           via ONNX Runtime's OpenVINO Execution Provider. Model files are downloaded
+           on first use into %LOCALAPPDATA%\Easydict\models, not bundled. -->
+      <ProjectReference Include="..\Easydict.OpenVINO\Easydict.OpenVINO.csproj" />
     </ItemGroup>
 
     <!-- FlaUI for proper UI Automation text selection -->

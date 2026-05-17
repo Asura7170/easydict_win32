@@ -5,30 +5,27 @@ sortTitle: Easydict
 voiceTitle: Easy Dict
 shortDescription: Easy to look up words or translate text
 description: |-
-  Easydict for Windows is a free, open-source translation and dictionary tool with Copilot+ PC enhanced local AI translation.
-  - Copilot+ PC enhanced local AI — Phi Silica on Copilot+ PCs, Foundry Local on regular Windows PCs, OpenVINO NLLB-200 offline fallback
-  - 20+ translation services — Google, DeepL, Bing, OpenAI, Gemini, DeepSeek, Groq, Zhipu AI, and more
-  - Real-time AI streaming translation, OCR screenshot translation, PDF/Markdown long-document translation
+  Easydict for Windows is a free and open-source translation tool built for speed and power — now with on-device Windows AI for Copilot+ PCs.
 
-  On supported Copilot+ PCs with a 40+ TOPS NPU, Easydict translates with Phi Silica for fast, private, on-device output. Standard translation features remain fully available on every Windows device.
-
-  Easydict combines on-device local AI, traditional translation engines, and modern cloud AI models into a unified workflow — from quick word lookups to full document translation. It is a Windows port of the popular macOS Easydict app, built with modern .NET and WinUI 3 for a native experience.
-
-  Highlights:
+  - Multi-AI support: OpenAI, Gemini, DeepSeek, Groq, Zhipu AI and more — plus on-device local AI, fully accelerated on Copilot+ PCs and any NPU-equipped device
   - All-in-one translation: Google, DeepL, Bing and 20+ services
-  - Multi-AI support: OpenAI, Gemini, DeepSeek, Groq, Zhipu AI, and more
+  - MDX custom dictionary support for advanced workflows
   - OCR screenshot translation using native Windows OCR
   - PDF and long-text translation with layout and formula preservation
-  - MDX custom dictionary support for advanced workflows
   - Native Windows experience with instant selection translation
-  - Real-time AI streaming translation with multiple LLMs
-  - Multiple window modes, global hotkeys, clipboard monitoring, system tray
-  - Text-to-Speech, dark mode, high DPI displays
+
+  Easydict combines on-device local AI, traditional translation engines, and modern cloud AI models into a unified workflow — from quick lookups to full document translation.
+
+  It is a Windows port of the popular macOS Easydict app, built with modern .NET and WinUI 3 for a native experience.
+
+  Supports 20+ translation services including Google Translate, DeepL, Bing, Linguee, Caiyun, and more.
+  Provides AI-powered real-time streaming translation with multiple LLMs.
+  Includes multiple window modes, global hotkeys, clipboard monitoring, and system tray integration.
+  Also supports text-to-speech, dark mode, and high DPI displays.
 
   Easydict includes AI-generated translation and grammar-correction features. AI output may vary and should be reviewed by the user.
 features:
-- 'Copilot+ PC enhanced local AI translation: Phi Silica, Foundry Local, and OpenVINO NLLB-200 offline fallback'
-- NPU-accelerated on-device translation on Copilot+ PCs (40+ TOPS), with graceful fallback on regular Windows PCs
+- On-device local AI translation, optimized for Copilot+ PCs and any NPU-equipped device
 - 20+ translation services including Google, Bing, DeepL, OpenAI, Gemini, DeepSeek, and Volcano Engine
 - Real-time LLM streaming translation with AI services
 - 'Multiple window modes: Main, Mini, and Fixed windows'

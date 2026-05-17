@@ -5,30 +5,27 @@ sortTitle: Easydict
 voiceTitle: イージーディクト
 shortDescription: 簡単に単語を調べたりテキストを翻訳
 description: |-
-  Easydict for Windows は、Copilot+ PC 強化型ローカル AI 翻訳に対応した、無料・オープンソースの翻訳・辞書ツールです。
-  - Copilot+ PC 強化型ローカル AI — Copilot+ PC では Phi Silica、通常の Windows PC では Foundry Local、オフラインフォールバックとして OpenVINO NLLB-200
-  - 20+ 翻訳サービス — Google、DeepL、Bing、OpenAI、Gemini、DeepSeek、Groq、智譜 AI など
-  - リアルタイム AI ストリーミング翻訳、OCR スクリーンショット翻訳、PDF/Markdown 長文ドキュメント翻訳
+  Easydict for Windows は、速度とパワーを追求した無料・オープンソースの翻訳ツールです——Copilot+ PC 向けのデバイス上 Windows AI に対応しました。
 
-  40+ TOPS NPU を搭載した対応 Copilot+ PC では、Phi Silica により高速・プライベートなデバイス上翻訳を実現。通常の Windows PC でも標準の翻訳機能はすべてご利用いただけます。
-
-  Easydict はデバイス上のローカル AI、従来の翻訳エンジン、最新のクラウド AI モデルを統一されたワークフローに統合し、単語検索から全文書翻訳までシームレスに対応します。macOS 版 Easydict の Windows 移植版で、最新の .NET と WinUI 3 によりネイティブ体験を提供します。
-
-  主な特徴：
+  - マルチ AI 対応：OpenAI、Gemini、DeepSeek、Groq、智譜 AI など、さらにデバイス上ローカル AI が Copilot+ PC や NPU 搭載デバイスで完全加速
   - オールインワン翻訳：Google、DeepL、Bing など 20+ サービス
-  - マルチ AI 対応：OpenAI、Gemini、DeepSeek、Groq、智譜 AI など
+  - MDX カスタム辞書、高度な単語検索に対応
   - OCR スクリーンショット翻訳：Windows ネイティブ OCR を使用
   - PDF・長文翻訳：レイアウトと数式を保持
-  - MDX カスタム辞書対応
   - ネイティブ Windows 体験：選択即翻訳
-  - 複数 LLM 対応のリアルタイム AI ストリーミング翻訳
-  - 複数のウィンドウモード、グローバルショートカット、クリップボード監視、システムトレイ
-  - テキスト読み上げ、ダークモード、高 DPI 表示
+
+  Easydict はデバイス上のローカル AI、従来の翻訳エンジン、最新のクラウド AI モデルを統一されたワークフローに統合し、単語検索から全文書翻訳までシームレスに対応します。
+
+  macOS 版 Easydict の Windows 移植版で、最新の .NET と WinUI 3 によりネイティブ体験を提供します。
+
+  Google 翻訳、DeepL、Bing、Linguee、Caiyun を含む 20+ 翻訳サービスに対応。
+  複数 LLM 対応のリアルタイム AI ストリーミング翻訳を提供。
+  複数のウィンドウモード、グローバルショートカット、クリップボード監視、システムトレイ統合を搭載。
+  テキスト読み上げ、ダークモード、高 DPI 表示にも対応。
 
   Easydict には AI 生成の翻訳・文法校正機能が含まれます。AI の出力にはばらつきがある場合があるため、利用者ご自身でご確認ください。
 features:
-- 'Copilot+ PC 強化型ローカル AI 翻訳：Phi Silica、Foundry Local、OpenVINO NLLB-200 オフラインフォールバック'
-- 'Copilot+ PC (40+ TOPS) の NPU アクセラレーションによるデバイス上翻訳、通常の Windows PC では自動フォールバック'
+- デバイス上ローカル AI 翻訳、Copilot+ PC や NPU 搭載デバイスで完全加速
 - 'Google、Bing、DeepL、OpenAI、Gemini、DeepSeek、火山翻訳を含む 20+ 翻訳サービス'
 - AI サービスによるリアルタイムストリーミング翻訳
 - '複数のウィンドウモード：メイン、ミニ、固定ウィンドウ'

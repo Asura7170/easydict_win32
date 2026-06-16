@@ -24,17 +24,48 @@ public sealed class DeepLService : BaseTranslationService
     private bool _useWebFirst = true; // Default to web translation (no API key needed)
     private bool _useQualityOptimized; // Default: latency-optimized (DeepL API default)
 
+    /// <summary>
+    /// Full supported-language set, used when an official API key is configured.
+    /// As of 2026 DeepL's next-generation model (official API) supports 100+ languages, covering every
+    /// language in this app's <see cref="Language"/> enum except Classical/Literary Chinese (no DeepL
+    /// target). This is only a local validation gate (it does not drive the UI), so it is derived from
+    /// the enum to stay aligned automatically. When an API key is configured,
+    /// <see cref="RefreshSupportedLanguagesAsync"/> can additively augment it with DeepL's live
+    /// <c>/v2/languages</c> list (best-effort, on-demand from <see cref="SupportsLanguagePair"/>).
+    /// </summary>
     private static readonly IReadOnlyList<Language> DeepLLanguages =
-    [
-        Language.SimplifiedChinese, Language.TraditionalChinese, Language.English, Language.Japanese,
-        Language.Korean, Language.French, Language.Spanish, Language.Portuguese,
-        Language.Italian, Language.German, Language.Russian, Language.Dutch,
-        Language.Polish, Language.Bulgarian, Language.Czech, Language.Danish,
-        Language.Estonian, Language.Finnish, Language.Greek, Language.Hungarian,
-        Language.Indonesian, Language.Latvian, Language.Lithuanian, Language.Norwegian,
-        Language.Romanian, Language.Slovak, Language.Slovenian, Language.Swedish,
-        Language.Turkish, Language.Ukrainian
-    ];
+        Array.AsReadOnly(
+            Enum.GetValues<Language>()
+                .Where(l => l is not (Language.Auto or Language.ClassicalChinese))
+                .ToArray());
+
+    /// <summary>
+    /// Languages supported by DeepL's free web JSON-RPC endpoint (<c>LMT_handle_texts</c>), used when
+    /// no API key is configured. This is DeepL's classic set; next-generation languages (Vietnamese,
+    /// Arabic, Thai, Hebrew, Tamil, Telugu, Hindi, Bengali, Urdu, Malay, Filipino, Persian) are
+    /// API-only and the web endpoint rejects them with HTTP 400, so they must NOT be offered here.
+    /// </summary>
+    private static readonly IReadOnlyList<Language> WebClassicLanguages =
+        Array.AsReadOnly(new[]
+        {
+            Language.SimplifiedChinese, Language.TraditionalChinese, Language.English, Language.Japanese,
+            Language.Korean, Language.French, Language.Spanish, Language.Portuguese,
+            Language.Italian, Language.German, Language.Russian, Language.Dutch,
+            Language.Polish, Language.Bulgarian, Language.Czech, Language.Danish,
+            Language.Estonian, Language.Finnish, Language.Greek, Language.Hungarian,
+            Language.Indonesian, Language.Latvian, Language.Lithuanian, Language.Norwegian,
+            Language.Romanian, Language.Slovak, Language.Slovenian, Language.Swedish,
+            Language.Turkish, Language.Ukrainian
+        });
+
+    private static readonly TimeSpan LanguageCacheTtl = TimeSpan.FromHours(24);
+
+    // Effective supported-language set (baseline ∪ dynamically fetched). Null until a successful
+    // fetch; reads fall back to the baseline. Replaced atomically; stored as a read-only view so
+    // callers of SupportedLanguages cannot mutate the underlying array.
+    private volatile IReadOnlyList<Language>? _effectiveLanguages;
+    private long _lastLanguageFetchTicks; // UTC ticks of the last fetch attempt; 0 = never
+    private int _languageFetchInFlight;   // 0/1 guard to avoid concurrent fetches
 
     public DeepLService(HttpClient httpClient) : base(httpClient)
     {
@@ -44,7 +75,67 @@ public sealed class DeepLService : BaseTranslationService
     public override string DisplayName => "DeepL";
     public override bool RequiresApiKey => false; // Web mode doesn't require API key
     public override bool IsConfigured => true; // Web mode is always available
-    public override IReadOnlyList<Language> SupportedLanguages => DeepLLanguages;
+    // Mode-aware: keyless web mode is limited to DeepL's classic set; the official API supports the
+    // full (next-gen) set. Prevents offering API-only languages to keyless users (they would 400).
+    public override IReadOnlyList<Language> SupportedLanguages =>
+        string.IsNullOrEmpty(_apiKey) ? WebClassicLanguages : (_effectiveLanguages ?? DeepLLanguages);
+
+    /// <summary>
+    /// Validate a language pair against the local/effective set (fast, offline path). When a
+    /// requested language is not yet known locally but an API key is configured, trigger a
+    /// background refresh of DeepL's official language list so a subsequent attempt succeeds.
+    /// </summary>
+    public override bool SupportsLanguagePair(Language from, Language to)
+    {
+        if (base.SupportsLanguagePair(from, to))
+        {
+            return true;
+        }
+
+        // Intentionally dormant future-proofing: the enum-derived API baseline already covers DeepL's
+        // current support, so this "miss" path (and the additive refresh it warms) effectively only
+        // fires if the enum ever gains a language DeepL adds later. It is a safety net, not a hot path.
+        if (!string.IsNullOrEmpty(_apiKey))
+        {
+            TriggerLanguageRefresh();
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Adds a clearer message for the common case where a keyless (free web) user requests a language
+    /// that only DeepL's official API supports (e.g. Vietnamese), guiding them to add an API key.
+    /// </summary>
+    protected override void ValidateRequest(TranslationRequest request)
+    {
+        if (string.IsNullOrEmpty(_apiKey) &&
+            !SupportsLanguagePair(request.FromLanguage, request.ToLanguage))
+        {
+            // The offending language may be the source or the target (e.g. Vietnamese -> English).
+            Language? apiOnly =
+                IsApiOnlyLanguage(request.ToLanguage) ? request.ToLanguage :
+                IsApiOnlyLanguage(request.FromLanguage) ? request.FromLanguage :
+                null;
+
+            if (apiOnly is { } language)
+            {
+                throw new TranslationException(
+                    $"DeepL free (web) mode does not support {language}. " +
+                    "Add a DeepL API key in Settings to translate this language.")
+                {
+                    ErrorCode = TranslationErrorCode.UnsupportedLanguage,
+                    ServiceId = ServiceId
+                };
+            }
+        }
+
+        base.ValidateRequest(request);
+    }
+
+    /// <summary>A language DeepL supports via the official API but not the free web endpoint.</summary>
+    private static bool IsApiOnlyLanguage(Language language) =>
+        DeepLLanguages.Contains(language) && !WebClassicLanguages.Contains(language);
 
     /// <summary>
     /// Configure the service with an API key and mode.
@@ -63,12 +154,206 @@ public sealed class DeepLService : BaseTranslationService
         _useQualityOptimized = useQualityOptimized;
     }
 
+    /// <summary>
+    /// Fire-and-forget, TTL-throttled background refresh of DeepL's supported-language list.
+    /// Safe to call frequently: a single attempt runs per <see cref="LanguageCacheTtl"/> window and
+    /// concurrent calls are coalesced. The comprehensive baseline list means a failed refresh has no
+    /// functional impact.
+    /// </summary>
+    private void TriggerLanguageRefresh()
+    {
+        if (string.IsNullOrEmpty(_apiKey))
+        {
+            return;
+        }
+
+        var last = Interlocked.Read(ref _lastLanguageFetchTicks);
+        if (last != 0 && DateTime.UtcNow - new DateTime(last, DateTimeKind.Utc) < LanguageCacheTtl)
+        {
+            return; // cached result is still fresh
+        }
+
+        if (Interlocked.CompareExchange(ref _languageFetchInFlight, 1, 0) != 0)
+        {
+            return; // a refresh is already running
+        }
+
+        // Throttle to one attempt per TTL window regardless of success/failure.
+        Interlocked.Exchange(ref _lastLanguageFetchTicks, DateTime.UtcNow.Ticks);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RefreshSupportedLanguagesAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[DeepL] Language refresh failed: {ex.Message}");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _languageFetchInFlight, 0);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Fetch DeepL's official target-language list and union it onto the baseline. Additive only:
+    /// a partial or empty response never shrinks supported languages below the baseline. Requires an
+    /// API key (the free web JSON-RPC path has no languages endpoint).
+    /// <para>
+    /// NOTE: This is intentionally dormant future-proofing. The API-mode baseline is already the full
+    /// <see cref="Language"/> enum (minus Classical Chinese), so a fetched list (a subset of the enum)
+    /// cannot currently change <see cref="SupportedLanguages"/>. It is retained so that, if the enum
+    /// gains a language DeepL also supports, the live set can confirm/augment it without a code change.
+    /// It stays public/tested so the parsing + mapping logic remains correct and ready.
+    /// </para>
+    /// </summary>
+    public async Task RefreshSupportedLanguagesAsync(CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(_apiKey))
+        {
+            return;
+        }
+
+        HashSet<Language> fetched;
+        try
+        {
+            var url = $"{GetApiHost()}/v2/languages?type=target";
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("DeepL-Auth-Key", _apiKey);
+
+            using var response = await HttpClient.SendAsync(httpRequest, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return; // keep baseline; this is a best-effort enhancement
+            }
+
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            fetched = ParseLanguages(json);
+        }
+        catch (Exception ex) when (
+            ex is HttpRequestException or JsonException or TaskCanceledException &&
+            !cancellationToken.IsCancellationRequested)
+        {
+            // Best-effort: network/timeout/malformed-response failures keep the baseline.
+            // Genuine caller cancellation (token signalled) is allowed to propagate.
+            System.Diagnostics.Debug.WriteLine($"[DeepL] Language refresh failed: {ex.Message}");
+            return;
+        }
+
+        if (fetched.Count == 0)
+        {
+            return;
+        }
+
+        var union = new HashSet<Language>(DeepLLanguages);
+        union.UnionWith(fetched);
+        _effectiveLanguages = Array.AsReadOnly(union.ToArray());
+    }
+
+    /// <summary>
+    /// Parse the DeepL <c>/v2/languages</c> JSON array (<c>[{"language":"EN-US","name":"..."}, ...]</c>)
+    /// into a set of <see cref="Language"/> values, skipping any code not recognized by the app.
+    /// </summary>
+    internal static HashSet<Language> ParseLanguages(string json)
+    {
+        var result = new HashSet<Language>();
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array)
+        {
+            return result;
+        }
+
+        foreach (var element in doc.RootElement.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.Object ||
+                !element.TryGetProperty("language", out var codeElement) ||
+                codeElement.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var mapped = MapDeepLCode(codeElement.GetString());
+            if (mapped.HasValue)
+            {
+                result.Add(mapped.Value);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Strict DeepL code → <see cref="Language"/> mapper (inverse of <see cref="GetDeepLLanguageCode"/>,
+    /// plus regional target variants). Returns null for unrecognized codes — deliberately NOT using
+    /// <c>LanguageCodes.FromIso639</c>, whose fallback would coerce unknown codes to English.
+    /// </summary>
+    internal static Language? MapDeepLCode(string? code)
+    {
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return null;
+        }
+
+        return code.Trim().ToUpperInvariant() switch
+        {
+            "ZH" or "ZH-HANS" => Language.SimplifiedChinese,
+            "ZH-HANT" => Language.TraditionalChinese,
+            "EN" or "EN-GB" or "EN-US" => Language.English,
+            "PT" or "PT-PT" or "PT-BR" => Language.Portuguese,
+            "JA" => Language.Japanese,
+            "KO" => Language.Korean,
+            "FR" => Language.French,
+            "ES" => Language.Spanish,
+            "IT" => Language.Italian,
+            "DE" => Language.German,
+            "RU" => Language.Russian,
+            "NL" => Language.Dutch,
+            "PL" => Language.Polish,
+            "BG" => Language.Bulgarian,
+            "CS" => Language.Czech,
+            "DA" => Language.Danish,
+            "ET" => Language.Estonian,
+            "FI" => Language.Finnish,
+            "EL" => Language.Greek,
+            "HU" => Language.Hungarian,
+            "ID" => Language.Indonesian,
+            "LV" => Language.Latvian,
+            "LT" => Language.Lithuanian,
+            "NB" or "NO" => Language.Norwegian,
+            "RO" => Language.Romanian,
+            "SK" => Language.Slovak,
+            "SL" => Language.Slovenian,
+            "SV" => Language.Swedish,
+            "TR" => Language.Turkish,
+            "UK" => Language.Ukrainian,
+            "VI" => Language.Vietnamese,
+            "AR" => Language.Arabic,
+            "TH" => Language.Thai,
+            "HE" => Language.Hebrew,
+            "TA" => Language.Tamil,
+            "TE" => Language.Telugu,
+            "HI" => Language.Hindi,
+            "BN" => Language.Bengali,
+            "UR" => Language.Urdu,
+            "MS" => Language.Malay,
+            "FA" => Language.Persian,
+            "FIL" or "TL" => Language.Filipino,
+            _ => null
+        };
+    }
+
     protected override async Task<TranslationResult> TranslateInternalAsync(
         TranslationRequest request,
         CancellationToken cancellationToken)
     {
-        // Try web translation first if enabled
-        if (_useWebFirst)
+        // Try web translation first if enabled — but only when the languages are web-supported.
+        // Next-gen languages are API-only, so attempting the web JSON-RPC for them is a guaranteed
+        // HTTP 400; route them straight to the official API instead (key is guaranteed present here,
+        // since keyless next-gen requests are rejected by ValidateRequest before reaching this point).
+        if (_useWebFirst && WebSupportsRequest(request))
         {
             try
             {
@@ -91,6 +376,14 @@ public sealed class DeepLService : BaseTranslationService
         // Use official API directly
         return await TranslateApiAsync(request, cancellationToken);
     }
+
+    /// <summary>
+    /// Whether the request's languages are translatable via DeepL's free web JSON-RPC endpoint
+    /// (the classic set). Next-gen languages are API-only.
+    /// </summary>
+    private static bool WebSupportsRequest(TranslationRequest request) =>
+        WebClassicLanguages.Contains(request.ToLanguage) &&
+        (request.FromLanguage == Language.Auto || WebClassicLanguages.Contains(request.FromLanguage));
 
     /// <summary>
     /// Translate using DeepL's official API (requires API key).
@@ -418,16 +711,36 @@ public sealed class DeepLService : BaseTranslationService
         Language.Bulgarian => "BG",
         Language.Czech => "CS",
         Language.Danish => "DA",
+        Language.Estonian => "ET",
         Language.Finnish => "FI",
         Language.Greek => "EL",
         Language.Hungarian => "HU",
         Language.Indonesian => "ID",
+        Language.Latvian => "LV",
+        Language.Lithuanian => "LT",
         Language.Norwegian => "NB",
         Language.Romanian => "RO",
+        Language.Slovak => "SK",
+        Language.Slovenian => "SL",
         Language.Swedish => "SV",
         Language.Turkish => "TR",
         Language.Ukrainian => "UK",
-        _ => language.ToIso639().ToUpper()
+        Language.Vietnamese => "VI",
+        Language.Arabic => "AR",
+        Language.Thai => "TH",
+        Language.Hebrew => "HE",
+        Language.Tamil => "TA",
+        Language.Telugu => "TE",
+        Language.Hindi => "HI",
+        Language.Bengali => "BN",
+        Language.Urdu => "UR",
+        Language.Malay => "MS",
+        Language.Persian => "FA",
+        // NOTE: DeepL's exact Tagalog/Filipino code ("TL" vs "FIL") should be confirmed against a
+        // live /v2/languages response; MapDeepLCode accepts both inbound. "TL" matches ToIso639.
+        Language.Filipino => "TL",
+        // ToUpperInvariant: DeepL codes are ASCII; avoid locale-sensitive casing (e.g. Turkish 'i').
+        _ => language.ToIso639().ToUpperInvariant()
     };
 }
 

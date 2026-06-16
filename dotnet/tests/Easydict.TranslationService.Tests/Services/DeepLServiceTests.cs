@@ -36,6 +36,121 @@ public class DeepLServiceTests
             .Should().BeTrue();
     }
 
+    [Theory]
+    // Regression set for #174 (initially missing) ...
+    [InlineData(Language.Vietnamese)]
+    [InlineData(Language.Arabic)]
+    [InlineData(Language.Thai)]
+    [InlineData(Language.Hebrew)]
+    [InlineData(Language.Tamil)]
+    [InlineData(Language.Telugu)]
+    // ... plus the rest of DeepL's current (100+ language, next-gen model) support present in the enum.
+    [InlineData(Language.Hindi)]
+    [InlineData(Language.Bengali)]
+    [InlineData(Language.Urdu)]
+    [InlineData(Language.Malay)]
+    [InlineData(Language.Filipino)]
+    [InlineData(Language.Persian)]
+    [InlineData(Language.Estonian)]
+    [InlineData(Language.Latvian)]
+    [InlineData(Language.Lithuanian)]
+    [InlineData(Language.Slovak)]
+    [InlineData(Language.Slovenian)]
+    public void SupportedLanguages_ApiMode_ContainsDeepLSupportedLanguages(Language language)
+    {
+        // The official API supports the full next-gen set; an API key selects API mode.
+        _service.Configure("test-key:fx", useWebFirst: true);
+        _service.SupportedLanguages.Should().Contain(language);
+    }
+
+    [Fact]
+    public void SupportedLanguages_ExcludesClassicalChinese()
+    {
+        // DeepL has no Classical/Literary Chinese target; excluded in both web and API mode.
+        _service.SupportedLanguages.Should().NotContain(Language.ClassicalChinese);
+        _service.Configure("test-key:fx", useWebFirst: true);
+        _service.SupportedLanguages.Should().NotContain(Language.ClassicalChinese);
+    }
+
+    [Fact]
+    public void SupportsLanguagePair_ApiMode_JapaneseToVietnamese_ReturnsTrue()
+    {
+        // Exact repro from #174 — works once an API key is configured (Vietnamese is API-only).
+        _service.Configure("test-key:fx", useWebFirst: true);
+        _service.SupportsLanguagePair(Language.Japanese, Language.Vietnamese)
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void SupportsLanguagePair_ApiMode_EnglishToVietnamese_ReturnsTrue()
+    {
+        _service.Configure("test-key:fx", useWebFirst: true);
+        _service.SupportsLanguagePair(Language.English, Language.Vietnamese)
+            .Should().BeTrue();
+    }
+
+    [Theory]
+    // Next-gen languages are API-only; the free web JSON-RPC endpoint rejects them (HTTP 400),
+    // so keyless mode must not offer them (root cause of "DeepL web translation failed: BadRequest").
+    [InlineData(Language.Vietnamese)]
+    [InlineData(Language.Arabic)]
+    [InlineData(Language.Thai)]
+    [InlineData(Language.Hindi)]
+    public void SupportedLanguages_KeylessWebMode_ExcludesApiOnlyLanguages(Language language)
+    {
+        _service.SupportedLanguages.Should().NotContain(language);
+    }
+
+    [Fact]
+    public void SupportedLanguages_KeylessWebMode_ContainsClassicLanguages()
+    {
+        _service.SupportedLanguages.Should().Contain(Language.English);
+        _service.SupportedLanguages.Should().Contain(Language.German);
+        _service.SupportedLanguages.Should().Contain(Language.Japanese);
+    }
+
+    [Fact]
+    public void SupportsLanguagePair_KeylessWebMode_EnglishToVietnamese_ReturnsFalse()
+    {
+        // No API key: Vietnamese is not translatable via the free web endpoint.
+        _service.SupportsLanguagePair(Language.English, Language.Vietnamese)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task TranslateAsync_KeylessWebMode_VietnameseTarget_ThrowsHelpfulMessage()
+    {
+        // Validation fails before any network call, with guidance to add an API key.
+        var request = new TranslationRequest
+        {
+            Text = "Hello",
+            FromLanguage = Language.English,
+            ToLanguage = Language.Vietnamese
+        };
+
+        var act = async () => await _service.TranslateAsync(request);
+
+        (await act.Should().ThrowAsync<TranslationException>())
+            .Which.Message.Should().Contain("API key");
+    }
+
+    [Fact]
+    public async Task TranslateAsync_KeylessWebMode_VietnameseSource_ThrowsHelpfulMessage()
+    {
+        // The API-only language may be the source (Vietnamese -> English); still guide to add a key.
+        var request = new TranslationRequest
+        {
+            Text = "Xin chào",
+            FromLanguage = Language.Vietnamese,
+            ToLanguage = Language.English
+        };
+
+        var act = async () => await _service.TranslateAsync(request);
+
+        (await act.Should().ThrowAsync<TranslationException>())
+            .Which.Message.Should().Contain("API key");
+    }
+
     [Fact]
     public void ServiceId_IsDeepL()
     {

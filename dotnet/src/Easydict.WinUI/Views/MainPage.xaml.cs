@@ -42,6 +42,7 @@ namespace Easydict.WinUI.Views
         private string? _staticUiSettingsSignature;
         private readonly TargetLanguageSelector _targetLanguageSelector;
         private TranslationLanguage _lastDetectedLanguage = TranslationLanguage.Auto;
+        private readonly LatestPlaybackTaskObserver _sourcePlaybackObserver = new();
         private bool _isLoaded;
         private bool _isQuerying;
         private volatile bool _isClosing;
@@ -2335,37 +2336,54 @@ namespace Easydict.WinUI.Views
 
         /// <summary>
         /// Play the source text using text-to-speech with the detected language voice.
+        /// If this button is already playing, stop it instead.
         /// </summary>
-        private async void OnSourcePlayClicked(object sender, RoutedEventArgs e)
+        private void OnSourcePlayClicked(object sender, RoutedEventArgs e)
         {
+            var tts = TextToSpeechService.Instance;
+
+            if (SourcePlayIcon.Glyph == "\uE71A")
+            {
+                _sourcePlaybackObserver.Invalidate();
+                tts.Stop();
+                SourcePlayIcon.Glyph = "\uE768";
+                return;
+            }
+
             var text = InputTextBox.Text;
             if (string.IsNullOrWhiteSpace(text))
                 return;
 
-            // Use detected language if available, otherwise default to English
             var language = _lastDetectedLanguage != TranslationLanguage.Auto
                 ? _lastDetectedLanguage
                 : TranslationLanguage.English;
 
-            var tts = TextToSpeechService.Instance;
+            SourcePlayIcon.Glyph = "\uE71A";
+            var playbackTask = tts.SpeakAsync(text, language);
+            _ = _sourcePlaybackObserver.ObserveAsync(
+                playbackTask,
+                (generation, error) => DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!_sourcePlaybackObserver.IsCurrent(generation))
+                    {
+                        return;
+                    }
 
-            void ResetIcon()
-            {
-                tts.PlaybackEnded -= ResetIcon;
-                DispatcherQueue.TryEnqueue(() => SourcePlayIcon.Glyph = "\uE768");
-            }
+                    SourcePlayIcon.Glyph = "\uE768";
+                    if (error != null)
+                    {
+                        Debug.WriteLine($"[TTS Error]: {error.Message}");
+                    }
+                }));
+        }
 
-            SourcePlayIcon.Glyph = "\uE71A"; // Stop icon
-            tts.PlaybackEnded += ResetIcon;
-            try
-            {
-                await tts.SpeakAsync(text, language);
-            }
-            catch (Exception ex)
-            {
-                ResetIcon();
-                Debug.WriteLine($"[TTS Error]: {ex.Message}");
-            }
+        private void NotifyAutoPlayTts(
+            ServiceQueryResult serviceResult,
+            Task playbackTask)
+        {
+            foreach (var control in _resultControls)
+                if (ReferenceEquals(control.ServiceResult, serviceResult) && control is ServiceResultItem sri)
+                { sri.NotifyTtsPlaying(playbackTask); break; }
         }
 
         private async void OnInputTextBoxKeyDown(object sender, KeyRoutedEventArgs e)
@@ -2677,7 +2695,8 @@ namespace Easydict.WinUI.Views
                                     if (!string.IsNullOrEmpty(targetText))
                                     {
                                         _hasAutoPlayedCurrentQuery = true;
-                                        _ = TextToSpeechService.Instance.SpeakAsync(targetText, targetLanguage);
+                                        var playbackTask = TextToSpeechService.Instance.SpeakAsync(targetText, targetLanguage);
+                                        NotifyAutoPlayTts(serviceResult, playbackTask);
                                     }
                                 }
                             });
@@ -2958,7 +2977,8 @@ namespace Easydict.WinUI.Views
                         if (!string.IsNullOrEmpty(targetText))
                         {
                             _hasAutoPlayedCurrentQuery = true;
-                            _ = TextToSpeechService.Instance.SpeakAsync(targetText, targetLanguage);
+                            var playbackTask = TextToSpeechService.Instance.SpeakAsync(targetText, targetLanguage);
+                            NotifyAutoPlayTts(serviceResult, playbackTask);
                         }
                     }
                 });
@@ -3224,7 +3244,8 @@ namespace Easydict.WinUI.Views
                     if (!string.IsNullOrEmpty(targetText))
                     {
                         _hasAutoPlayedCurrentQuery = true;
-                        _ = TextToSpeechService.Instance.SpeakAsync(targetText, targetLanguage);
+                        var playbackTask = TextToSpeechService.Instance.SpeakAsync(targetText, targetLanguage);
+                        NotifyAutoPlayTts(serviceResult, playbackTask);
                     }
                 }
             });

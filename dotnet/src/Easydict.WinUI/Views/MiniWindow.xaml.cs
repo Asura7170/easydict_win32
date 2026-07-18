@@ -50,6 +50,7 @@ public sealed partial class MiniWindow : Window
     private readonly List<IServiceResultView> _resultControls = new();
     private readonly TargetLanguageSelector _targetLanguageSelector;
     private TranslationLanguage _lastDetectedLanguage = TranslationLanguage.Auto;
+    private readonly LatestPlaybackTaskObserver _sourcePlaybackObserver = new();
     private AppWindow? _appWindow;
     private OverlappedPresenter? _presenter;
     private bool _isPinned;
@@ -1286,7 +1287,8 @@ public sealed partial class MiniWindow : Window
                                 if (!string.IsNullOrEmpty(targetText))
                                 {
                                     _hasAutoPlayedCurrentQuery = true;
-                                    _ = TextToSpeechService.Instance.SpeakAsync(targetText, targetLanguage);
+                                    var playbackTask = TextToSpeechService.Instance.SpeakAsync(targetText, targetLanguage);
+                                    NotifyAutoPlayTts(serviceResult, playbackTask);
                                 }
                             }
 
@@ -1749,7 +1751,8 @@ public sealed partial class MiniWindow : Window
                 if (!string.IsNullOrEmpty(targetText))
                 {
                     _hasAutoPlayedCurrentQuery = true;
-                    _ = TextToSpeechService.Instance.SpeakAsync(targetText, targetLanguage);
+                    var playbackTask = TextToSpeechService.Instance.SpeakAsync(targetText, targetLanguage);
+                    NotifyAutoPlayTts(serviceResult, playbackTask);
                 }
             }
 
@@ -1872,46 +1875,56 @@ public sealed partial class MiniWindow : Window
         await StartQueryTrackedAsync();
     }
 
-    private async void OnSourcePlayClicked(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// Play the source text using text-to-speech with the detected language voice.
+    /// If this button is already playing, stop it instead.
+    /// </summary>
+    private void OnSourcePlayClicked(object sender, RoutedEventArgs e)
     {
+        var tts = TextToSpeechService.Instance;
+
+        if (SourcePlayIcon.Glyph == "\uE71A")
+        {
+            _sourcePlaybackObserver.Invalidate();
+            tts.Stop();
+            SourcePlayIcon.Glyph = "\uE768";
+            return;
+        }
+
         var text = InputTextBox.Text;
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        // Use detected language if available, otherwise default to English
         var language = _lastDetectedLanguage != TranslationLanguage.Auto
             ? _lastDetectedLanguage
             : TranslationLanguage.English;
 
-        var tts = TextToSpeechService.Instance;
+        SourcePlayIcon.Glyph = "\uE71A";
+        var playbackTask = tts.SpeakAsync(text, language);
+        _ = _sourcePlaybackObserver.ObserveAsync(
+            playbackTask,
+            (generation, error) => DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!_sourcePlaybackObserver.IsCurrent(generation))
+                {
+                    return;
+                }
 
-        // Reset the icon back to the play glyph on the UI thread.
-        void ResetIconGlyph()
-        {
-            DispatcherQueue.TryEnqueue(() => SourcePlayIcon.Glyph = "\uE768");
-        }
+                SourcePlayIcon.Glyph = "\uE768";
+                if (error != null)
+                {
+                    Debug.WriteLine($"[TTS Error]: {error.Message}");
+                }
+            }));
+    }
 
-        // Handler for playback completion; unsubscribes itself and resets the icon.
-        void OnPlaybackEnded()
-        {
-            tts.PlaybackEnded -= OnPlaybackEnded;
-            ResetIconGlyph();
-        }
-
-        SourcePlayIcon.Glyph = "\uE71A"; // Stop icon
-        tts.PlaybackEnded += OnPlaybackEnded;
-
-        try
-        {
-            await tts.SpeakAsync(text, language);
-        }
-        finally
-        {
-            // Ensure we always detach the handler and reset the icon,
-            // even if SpeakAsync fails, is cancelled, or playback ends early.
-            tts.PlaybackEnded -= OnPlaybackEnded;
-            ResetIconGlyph();
-        }
+    private void NotifyAutoPlayTts(
+        ServiceQueryResult serviceResult,
+        Task playbackTask)
+    {
+        foreach (var control in _resultControls)
+            if (ReferenceEquals(control.ServiceResult, serviceResult) && control is ServiceResultItem sri)
+            { sri.NotifyTtsPlaying(playbackTask); break; }
     }
 
     private void SetSourceTextState(bool expanded)

@@ -155,6 +155,7 @@ public sealed partial class SettingsPage : Page
     private const int SettingsTabSwitchIndicatorDelayMs = 50;
     private const int SettingsTabSwitchIndicatorFrameDelayMs = 16;
     private const int DeferredUnloadTeardownDelayMs = 250;
+    private const string TtsVoicePreviewText = "This is a text-to-speech preview.";
 
     private static readonly Dictionary<string, int> PreferredServiceDisplayOrder = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -187,6 +188,8 @@ public sealed partial class SettingsPage : Page
     private bool _isUnloaded;
     private bool _isTornDown;
     private bool _changeHandlersRegistered;
+    private bool _suppressTtsVoiceSelectionChanged;
+    private string _pendingTtsVoiceId = string.Empty;
     private bool _hasUnsavedChanges; // Track whether any settings have been modified since last save
     private bool _isMainWindowReorderModeEnabled;
     private bool _isMiniWindowReorderModeEnabled;
@@ -1550,6 +1553,13 @@ public sealed partial class SettingsPage : Page
         TtsSettingsHeaderText.Text = loc.GetString("TtsSettingsHeader");
         TtsSpeedLabelText.Text = loc.GetString("TtsSpeedLabel");
         AutoPlayTranslationToggle.Header = loc.GetString("AutoPlayTranslation");
+        TtsVoiceLabelText.Text = loc.GetString("TtsVoiceLabel");
+        AutomationProperties.SetName(TtsVoiceCombo, TtsVoiceLabelText.Text);
+        TtsVoicePreviewButtonText.Text = loc.GetString("TtsVoicePreviewButton");
+        AutomationProperties.SetName(TtsVoicePreviewButton, TtsVoicePreviewButtonText.Text);
+        var voiceRefreshText = loc.GetString("TtsVoiceRefreshTooltip");
+        ToolTipService.SetToolTip(TtsVoiceRefreshButton, voiceRefreshText);
+        AutomationProperties.SetName(TtsVoiceRefreshButton, voiceRefreshText);
     }
 
     private void ApplyBehaviorLocalization(LocalizationService loc)
@@ -2196,6 +2206,7 @@ public sealed partial class SettingsPage : Page
         TtsSpeedSlider.ValueChanged += OnSettingChanged;
         ResultFontScaleSlider.ValueChanged += OnSettingChanged;
         AutoPlayTranslationToggle.Toggled += OnSettingChanged;
+        TtsVoiceCombo.SelectionChanged += OnTtsVoiceSelectionChanged;
 
         // TextBox/PasswordBox changes - existing
         DeepLKeyBox.PasswordChanged += OnSettingChanged;
@@ -2301,6 +2312,7 @@ public sealed partial class SettingsPage : Page
         TtsSpeedSlider.ValueChanged -= OnSettingChanged;
         ResultFontScaleSlider.ValueChanged -= OnSettingChanged;
         AutoPlayTranslationToggle.Toggled -= OnSettingChanged;
+        TtsVoiceCombo.SelectionChanged -= OnTtsVoiceSelectionChanged;
 
         DeepLKeyBox.PasswordChanged -= OnSettingChanged;
         OpenAIKeyBox.PasswordChanged -= OnSettingChanged;
@@ -2699,6 +2711,7 @@ public sealed partial class SettingsPage : Page
             || AlwaysOnTopToggle.IsOn != _settings.AlwaysOnTop
             || LaunchAtStartupToggle.IsOn != _settings.LaunchAtStartup
             || !SameDouble(TtsSpeedSlider.Value, _settings.TtsSpeed)
+            || !SameSetting(_pendingTtsVoiceId, _settings.SelectedTtsVoiceId)
             || AutoPlayTranslationToggle.IsOn != _settings.AutoPlayTranslation
             || HideEmptyServiceResultsToggle.IsOn != _settings.HideEmptyServiceResults
             || EnableLocalDictionarySuggestionsToggle.IsOn != _settings.EnableLocalDictionarySuggestions
@@ -2950,6 +2963,9 @@ public sealed partial class SettingsPage : Page
             // TTS settings
             TtsSpeedSlider.Value = _settings.TtsSpeed;
             AutoPlayTranslationToggle.IsOn = _settings.AutoPlayTranslation;
+            _pendingTtsVoiceId = _settings.SelectedTtsVoiceId;
+
+            _ = LoadTtsVoicesAsync();
 
             // App Theme - select based on current setting
             SelectComboByTag(AppThemeCombo, _settings.AppTheme);
@@ -4298,6 +4314,7 @@ public sealed partial class SettingsPage : Page
         _settings.ShowSwapButton = ShowSwapButtonToggle.IsOn;
         _settings.LaunchAtStartup = LaunchAtStartupToggle.IsOn;
         _settings.TtsSpeed = TtsSpeedSlider.Value;
+        _settings.SelectedTtsVoiceId = _pendingTtsVoiceId;
         _settings.AutoPlayTranslation = AutoPlayTranslationToggle.IsOn;
         _settings.HideEmptyServiceResults = HideEmptyServiceResultsToggle.IsOn;
         _settings.EnableLocalDictionarySuggestions = EnableLocalDictionarySuggestionsToggle.IsOn;
@@ -5860,6 +5877,178 @@ public sealed partial class SettingsPage : Page
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
     }
+
+    #region TTS Voice Selection
+    private async Task LoadTtsVoicesAsync()
+    {
+        IReadOnlyList<TextToSpeechService.TtsVoiceEntry> voices;
+        var enumerationSucceeded = true;
+        try
+        {
+            voices = await Task.Run(() => TextToSpeechService.Instance.GetAllVoices());
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Settings] Failed to enumerate TTS voices: {ex}");
+            voices = Array.Empty<TextToSpeechService.TtsVoiceEntry>();
+            enumerationSucceeded = false;
+        }
+
+        if (_isUnloaded || _isTornDown)
+        {
+            return;
+        }
+
+        PopulateTtsVoiceCombo(voices, enumerationSucceeded);
+    }
+
+
+    private void PopulateTtsVoiceCombo(
+        IReadOnlyList<TextToSpeechService.TtsVoiceEntry> voices,
+        bool enumerationSucceeded)
+    {
+        var wasSuppressed = _suppressTtsVoiceSelectionChanged;
+        _suppressTtsVoiceSelectionChanged = true;
+        try
+        {
+        TtsVoiceCombo.Items.Clear();
+
+        var loc = LocalizationService.Instance;
+        var autoItem = new ComboBoxItem
+        {
+            Content = loc.GetString("TtsVoiceAuto"),
+            Tag = string.Empty
+        };
+        TtsVoiceCombo.Items.Add(autoItem);
+
+        var sortedVoices = voices.OrderByDescending(v => v.IsNeural)
+                                 .ThenBy(v => v.DisplayName)
+                                 .ToList();
+
+        foreach (var voice in sortedVoices)
+        {
+            var suffix = voice.IsSapi5 ? " [SAPI]" : "";
+            var item = new ComboBoxItem
+            {
+                Content = $"{voice.DisplayName} - {voice.Language}{suffix}",
+                Tag = voice.Id
+            };
+            TtsVoiceCombo.Items.Add(item);
+        }
+
+        var selectedVoiceId = _pendingTtsVoiceId;
+        if (string.IsNullOrEmpty(selectedVoiceId))
+        {
+            TtsVoiceCombo.SelectedIndex = 0;
+        }
+        else
+        {
+            var selectedItem = TtsVoiceCombo.Items.OfType<ComboBoxItem>()
+                .FirstOrDefault(i => (string?)i.Tag == selectedVoiceId);
+            
+            if (selectedItem != null)
+            {
+                TtsVoiceCombo.SelectedItem = selectedItem;
+            }
+            else
+            {
+                TtsVoiceCombo.SelectedIndex = 0;
+                if (enumerationSucceeded)
+                {
+                    _pendingTtsVoiceId = string.Empty;
+                    OnSettingChanged(TtsVoiceCombo, EventArgs.Empty);
+                }
+            }
+        }
+        }
+        finally
+        {
+            _suppressTtsVoiceSelectionChanged = wasSuppressed;
+        }
+    }
+
+    private void OnTtsVoiceSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressTtsVoiceSelectionChanged)
+        {
+            return;
+        }
+
+        if (TtsVoiceCombo.SelectedItem is ComboBoxItem item && item.Tag is string voiceId)
+        {
+            _pendingTtsVoiceId = voiceId;
+            OnSettingChanged(sender, e);
+        }
+    }
+
+    private async void OnTtsVoicePreviewClicked(object sender, RoutedEventArgs e)
+    {
+        if (_isUnloaded || _isTornDown)
+        {
+            return;
+        }
+
+        var tts = TextToSpeechService.Instance;
+        if (TtsVoicePreviewIcon.Glyph == "\uE71A")
+        {
+            tts.Stop();
+            return;
+        }
+
+        var lifetimeToken = _lifetimeCts.Token;
+        TtsVoicePreviewIcon.Glyph = "\uE71A";
+        try
+        {
+            await tts.SpeakPreviewAsync(
+                TtsVoicePreviewText,
+                TranslationLanguage.English,
+                _pendingTtsVoiceId,
+                TtsSpeedSlider.Value,
+                lifetimeToken);
+        }
+        finally
+        {
+            if (!_isUnloaded && !_isTornDown)
+            {
+                TtsVoicePreviewIcon.Glyph = "\uE768";
+            }
+        }
+    }
+
+    private async void OnTtsVoiceRefreshClicked(object sender, RoutedEventArgs e)
+    {
+        if (!TtsVoiceRefreshButton.IsEnabled) return;
+
+        TtsVoiceRefreshButton.IsEnabled = false;
+        TtsVoiceCombo.IsEnabled = false;
+        TtsVoiceRefreshProgress.Visibility = Visibility.Visible;
+
+        try
+        {
+            var voices = await Task.Run(() => TextToSpeechService.Instance.RefreshVoices());
+            if (_isUnloaded || _isTornDown)
+            {
+                return;
+            }
+
+            PopulateTtsVoiceCombo(voices, enumerationSucceeded: true);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Settings] Failed to refresh TTS voices: {ex}");
+        }
+        finally
+        {
+            if (!_isUnloaded && !_isTornDown)
+            {
+                TtsVoiceRefreshButton.IsEnabled = true;
+                TtsVoiceCombo.IsEnabled = true;
+                TtsVoiceRefreshProgress.Visibility = Visibility.Collapsed;
+            }
+        }
+    }
+
+    #endregion
 
     #endregion
 }

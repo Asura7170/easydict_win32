@@ -38,6 +38,7 @@ public sealed partial class ServiceResultItem : UserControl, IServiceResultView
     private string? _foundryLocalDocsUrl;
     private MdxDictionaryTranslationService? _currentMdxService;
     private FrameworkElement? _themeRoot;
+    private readonly LatestPlaybackTaskObserver _ttsPlaybackObserver = new();
 
     /// <summary>
     /// Exposes the control instance for parent item hosting.
@@ -124,6 +125,7 @@ public sealed partial class ServiceResultItem : UserControl, IServiceResultView
 
     public void Cleanup()
     {
+        _ttsPlaybackObserver.Invalidate();
         Debug.WriteLine(
             $"[ServiceResultItem] Cleanup serviceId={_cachedServiceId ?? _serviceResult?.ServiceId ?? "<none>"} webViewInitialized={_webViewInitialized}");
 
@@ -1459,37 +1461,36 @@ public sealed partial class ServiceResultItem : UserControl, IServiceResultView
             ttsText = result.OriginalText;
         }
 
-        speakerButton.Click += async (s, e) =>
+        var playbackObserver = new LatestPlaybackTaskObserver();
+        speakerButton.Click += (s, e) =>
         {
             var tts = TextToSpeechService.Instance;
 
-            // Reset the icon back to the speaker glyph on the UI thread.
-            void ResetIconGlyph()
+            if (speakerIcon.Glyph == "\uE71A")
             {
-                DispatcherQueue.TryEnqueue(() => speakerIcon.Glyph = "\uE767");
+                playbackObserver.Invalidate();
+                tts.Stop();
+                speakerIcon.Glyph = "\uE767";
+                return;
             }
 
-            // Handler for playback completion; unsubscribes itself and resets the icon.
-            void OnPlaybackEnded()
-            {
-                tts.PlaybackEnded -= OnPlaybackEnded;
-                ResetIconGlyph();
-            }
+            speakerIcon.Glyph = "\uE71A";
+            var playbackTask = tts.SpeakAsync(ttsText, ttsLanguage);
+            _ = playbackObserver.ObserveAsync(
+                playbackTask,
+                (generation, error) => DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!playbackObserver.IsCurrent(generation))
+                    {
+                        return;
+                    }
 
-            speakerIcon.Glyph = "\uE71A"; // Stop icon
-            tts.PlaybackEnded += OnPlaybackEnded;
-
-            try
-            {
-                await tts.SpeakAsync(ttsText, ttsLanguage);
-            }
-            finally
-            {
-                // Ensure we always detach the handler and reset the icon,
-                // even if SpeakAsync fails, is cancelled, or playback ends early.
-                tts.PlaybackEnded -= OnPlaybackEnded;
-                ResetIconGlyph();
-            }
+                    speakerIcon.Glyph = "\uE767";
+                    if (error != null)
+                    {
+                        Debug.WriteLine($"[TTS Error]: {error.Message}");
+                    }
+                }));
         };
 
         panel.Children.Add(speakerButton);
@@ -1785,41 +1786,44 @@ public sealed partial class ServiceResultItem : UserControl, IServiceResultView
         });
     }
 
-    private async void OnPlayClicked(object sender, RoutedEventArgs e)
+    private void OnPlayClicked(object sender, RoutedEventArgs e)
     {
+        var tts = TextToSpeechService.Instance;
+
+        if (PlayIcon.Glyph == "\uE71A")
+        {
+            _ttsPlaybackObserver.Invalidate();
+            tts.Stop();
+            PlayIcon.Glyph = "\uE768";
+            return;
+        }
+
         var result = _serviceResult?.Result;
         if (result == null || string.IsNullOrEmpty(result.TranslatedText))
             return;
 
-        var tts = TextToSpeechService.Instance;
+        var playbackTask = tts.SpeakAsync(result.TranslatedText, result.TargetLanguage);
+        NotifyTtsPlaying(playbackTask);
+    }
 
-        // Reset the icon back to the play glyph on the UI thread.
-        void ResetIconGlyph()
-        {
-            DispatcherQueue.TryEnqueue(() => PlayIcon.Glyph = "\uE768");
-        }
+    internal void NotifyTtsPlaying(Task playbackTask)
+    {
+        PlayIcon.Glyph = "\uE71A";
+        _ = _ttsPlaybackObserver.ObserveAsync(
+            playbackTask,
+            (generation, error) => DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!_ttsPlaybackObserver.IsCurrent(generation))
+                {
+                    return;
+                }
 
-        // Handler for playback completion; unsubscribes itself and resets the icon.
-        void OnPlaybackEnded()
-        {
-            tts.PlaybackEnded -= OnPlaybackEnded;
-            ResetIconGlyph();
-        }
-
-        PlayIcon.Glyph = "\uE71A"; // Stop icon
-        tts.PlaybackEnded += OnPlaybackEnded;
-
-        try
-        {
-            await tts.SpeakAsync(result.TranslatedText, result.TargetLanguage);
-        }
-        finally
-        {
-            // Ensure we always detach the handler and reset the icon,
-            // even if SpeakAsync fails, is cancelled, or playback ends early.
-            tts.PlaybackEnded -= OnPlaybackEnded;
-            ResetIconGlyph();
-        }
+                PlayIcon.Glyph = "\uE768";
+                if (error != null)
+                {
+                    Debug.WriteLine($"[TTS Error]: {error.Message}");
+                }
+            }));
     }
 
     /// <summary>

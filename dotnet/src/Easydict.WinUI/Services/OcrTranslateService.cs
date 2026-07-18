@@ -54,6 +54,8 @@ public sealed class OcrTranslateService
                 var ocrResult = await ocrEngine.RecognizeAsync(
                     capture, preferredLanguage, cts.Token);
 
+                cts.Token.ThrowIfCancellationRequested();
+
                 if (string.IsNullOrWhiteSpace(ocrResult.Text))
                 {
                     Debug.WriteLine("[OcrTranslate] No text recognized");
@@ -130,6 +132,8 @@ public sealed class OcrTranslateService
                 var ocrResult = await ocrEngine.RecognizeAsync(
                     capture, preferredLanguage, cts.Token);
 
+                cts.Token.ThrowIfCancellationRequested();
+
                 if (string.IsNullOrWhiteSpace(ocrResult.Text))
                 {
                     Debug.WriteLine("[OcrTranslate] No text recognized (silent)");
@@ -138,19 +142,17 @@ public sealed class OcrTranslateService
 
                 Debug.WriteLine($"[OcrTranslate] Silent OCR: {ocrResult.Text.Length} chars → clipboard");
 
-                // Copy to clipboard on UI thread
-                if (!_dispatcherQueue.TryEnqueue(() =>
+                // Copy to clipboard on UI thread — retry because clipboard writes can
+                // fail transiently when another app (Office clipboard monitor, etc.)
+                // holds the clipboard open.
+                if (!_dispatcherQueue.TryEnqueue(async () =>
                 {
-                    try
+                    await RunClipboardWriteWithRetryAsync(() =>
                     {
                         var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage();
                         dataPackage.SetText(ocrResult.Text);
                         Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"[OcrTranslate] Clipboard error: {ex.Message}");
-                    }
+                    }, "Silent OCR clipboard write");
                 }))
                 {
                     Debug.WriteLine("[OcrTranslate] Failed to enqueue clipboard write — dispatcher shut down?");
@@ -218,4 +220,30 @@ public sealed class OcrTranslateService
         OcrServiceOptions.IsKnownDefaultEndpoint(options.Endpoint)
             ? options.Endpoint
             : "<redacted>";
+
+    private static async Task RunClipboardWriteWithRetryAsync(Action clipboardOp, string opName)
+    {
+        const int maxAttempts = 3;
+        const int retryDelayMs = 50;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                clipboardOp();
+                return;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[OcrTranslate] {opName} attempt {attempt}/{maxAttempts} failed: {ex.Message}");
+            }
+
+            if (attempt < maxAttempts)
+            {
+                await Task.Delay(retryDelayMs);
+            }
+        }
+
+        Debug.WriteLine($"[OcrTranslate] {opName} gave up after {maxAttempts} retries");
+    }
 }

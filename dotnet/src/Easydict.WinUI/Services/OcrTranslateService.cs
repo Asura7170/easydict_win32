@@ -12,6 +12,8 @@ public sealed class OcrTranslateService
     private readonly ScreenCaptureService _captureService = new();
     private readonly DispatcherQueue _dispatcherQueue;
 
+    internal static volatile bool OcrCaptureInProgress;
+
     // Concurrency guard: only one OCR operation can run at a time.
     // Owned by RunOcrPipelineAsync — only that method creates and disposes.
     // Other code may Cancel() but must NOT Dispose().
@@ -82,6 +84,7 @@ public sealed class OcrTranslateService
             _captureService.CancelCurrentCapture();
         }
 
+        OcrCaptureInProgress = true;
         try
         {
             var capture = await _captureService.CaptureRegionAsync(cts.Token).ConfigureAwait(false);
@@ -136,7 +139,7 @@ public sealed class OcrTranslateService
         }
         finally
         {
-            Interlocked.CompareExchange(ref _currentCts, null, cts);
+            OcrCaptureInProgress = Interlocked.CompareExchange(ref _currentCts, null, cts) != cts;
         }
     }
 

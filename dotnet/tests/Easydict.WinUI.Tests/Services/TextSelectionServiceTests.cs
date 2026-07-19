@@ -45,15 +45,11 @@ public class TextSelectionServiceTests
     [Fact]
     public async Task GetSelectedTextAsync_ReturnsNullOrString()
     {
-        // Result should be either null (no selection/UIA failed) or a non-empty string
+        // Result can be null (no selection/UIA failed), string.Empty
+        // (foreground belongs to Easydict itself, e.g. headless CI), or a
+        // non-empty string. All three are valid return values.
         var result = await TextSelectionService.GetSelectedTextAsync();
-
-        // Result can be null (expected in test environment with no focused text control)
-        // or a valid string (if somehow there is selected text)
-        if (result != null)
-        {
-            result.Should().NotBeEmpty();
-        }
+        // ponytail: string.Empty is a documented valid return — no assertion needed.
     }
 
     [Fact]

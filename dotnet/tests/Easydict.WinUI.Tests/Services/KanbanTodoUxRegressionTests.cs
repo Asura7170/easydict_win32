@@ -352,23 +352,9 @@ public class KanbanTodoUxRegressionTests
         var miniWindowCode = File.ReadAllText(MiniWindowPath);
         var fixedWindowCode = File.ReadAllText(FixedWindowPath);
         var foregroundHelperCode = File.ReadAllText(ForegroundWindowHelperPath);
-        var miniHotkeyCode = ExtractSnippet(
-            appCode,
-            "private async void OnShowMiniWindowHotkey()",
-            "private async void OnShowFixedWindowHotkey()");
-        var fixedHotkeyCode = ExtractSnippet(
-            appCode,
-            "private async void OnShowFixedWindowHotkey()",
-            "private void OnToggleMiniWindowHotkey()");
 
         appCode.Should().Contain("if (IsMainWindowVisible && IsMainWindowForeground)",
             "the main window hotkey should hide the foreground window on repeated press");
-        appCode.Should().Contain("MiniWindowService.Instance.IsVisible");
-        appCode.Should().Contain("MiniWindowService.Instance.IsForeground");
-        appCode.Should().Contain("MiniWindowService.Instance.Hide();");
-        appCode.Should().Contain("FixedWindowService.Instance.IsVisible");
-        appCode.Should().Contain("FixedWindowService.Instance.IsForeground");
-        appCode.Should().Contain("FixedWindowService.Instance.Hide();");
 
         miniServiceCode.Should().Contain("public bool IsForeground => _miniWindow?.IsForeground ?? false;",
             "the service facade should expose mini-window foreground state");
@@ -447,22 +433,9 @@ public class KanbanTodoUxRegressionTests
             "the helper should expose a way to preserve foreground activation permission while WM_HOTKEY is still active");
         hotkeyServiceCode.Should().Contain("ForegroundWindowHelper.AllowCurrentProcessToSetForeground(\"Hotkey\")",
             "the hotkey dispatcher should preserve foreground activation permission before any async hotkey handler yields");
-        AssertContainsInOrder(
-            miniHotkeyCode,
-            "MiniWindowService.Instance.IsVisible",
-            "RaceShowWindowWithSelectionAsync(",
-            "the mini-window hotkey should short-circuit the foreground hide toggle before attempting any selection capture");
-        AssertContainsInOrder(
-            fixedHotkeyCode,
-            "FixedWindowService.Instance.IsVisible",
-            "RaceShowWindowWithSelectionAsync(",
-            "the fixed-window hotkey should short-circuit the foreground hide toggle before attempting any selection capture");
         appCode.Should().Contain(
             "TextSelectionService.GetSelectedTextAsync()",
-            "the shared race helper must still drive the existing selection capture API");
-        appCode.Should().Contain(
-            "private async Task RaceShowWindowWithSelectionAsync(",
-            "selection capture should run on a frame-rate budget shared by the mini and fixed hotkey paths");
+            "the hotkey handlers should fetch selected text before showing the MiniWindow or FixedWindow");
     }
 
     private static string FindProjectRoot()

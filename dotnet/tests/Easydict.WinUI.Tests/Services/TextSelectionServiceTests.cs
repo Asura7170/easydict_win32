@@ -49,7 +49,10 @@ public class TextSelectionServiceTests
         // (foreground belongs to Easydict itself, e.g. headless CI), or a
         // non-empty string. All three are valid return values.
         var result = await TextSelectionService.GetSelectedTextAsync();
-        // ponytail: string.Empty is a documented valid return — no assertion needed.
+        // No assertion: string.Empty is a documented valid return value (the method
+        // returns "" when the foreground window is Easydict itself, e.g. headless CI).
+        // The return type string? documents nullability; this test name documents the
+        // full contract: null, string.Empty, or a non-empty string.
     }
 
     [Fact]

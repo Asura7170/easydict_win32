@@ -139,6 +139,10 @@ public sealed class OcrTranslateService
         }
         finally
         {
+            // Atomically swap out our CTS and reflect whether another pipeline has
+            // queued in the meantime (its CTS was already atomically swapped in
+            // before ours was cancelled, so _currentCts is never null while a stale
+            // finally runs — it's always the alive caller's CTS or a newer one).
             OcrCaptureInProgress = Interlocked.CompareExchange(ref _currentCts, null, cts) != cts;
         }
     }

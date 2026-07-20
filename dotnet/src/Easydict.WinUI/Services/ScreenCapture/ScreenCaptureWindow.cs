@@ -195,6 +195,17 @@ public sealed class ScreenCaptureWindow : IDisposable
         {
             CaptureDesktop();
             CreateOverlayWindow();
+
+            // If the token was cancelled before the window was created, the
+            // callback already completed _resultTcs with null. Tear down the
+            // now-stray overlay immediately instead of entering the message loop.
+            if (_resultTcs?.Task.IsCompleted == true)
+            {
+                DestroyWindow(_hwnd);
+                _hwnd = IntPtr.Zero;
+                return;
+            }
+
             _windowDetector.TakeSnapshot(_hwnd);
             InitializeTips();
 

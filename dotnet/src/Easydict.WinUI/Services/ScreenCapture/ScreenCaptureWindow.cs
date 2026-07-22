@@ -33,6 +33,7 @@ public sealed class ScreenCaptureWindow : IDisposable
     private const int WS_EX_TOPMOST = 0x00000008;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_VISIBLE = 0x10000000;
+    private const int HwndMessage = -3;
 
     // Messages
     private const int WM_PAINT = 0x000F;
@@ -212,12 +213,14 @@ public sealed class ScreenCaptureWindow : IDisposable
             if (Volatile.Read(ref _cancellationRequested) != 0)
                 return;
 
-            CaptureDesktop();
+            var isLifecycleProbe = _lifecycleProbe is not null;
+            if (!isLifecycleProbe)
+                CaptureDesktop();
 
             if (Volatile.Read(ref _cancellationRequested) != 0)
                 return;
 
-            CreateOverlayWindow();
+            CreateCaptureWindow(isLifecycleProbe);
 
             if (Volatile.Read(ref _cancellationRequested) != 0)
             {
@@ -225,7 +228,7 @@ public sealed class ScreenCaptureWindow : IDisposable
                 return;
             }
 
-            if (_lifecycleProbe is null)
+            if (!isLifecycleProbe)
             {
                 _windowDetector.TakeSnapshot(Volatile.Read(ref _hwnd));
                 InitializeTips();
@@ -248,6 +251,7 @@ public sealed class ScreenCaptureWindow : IDisposable
         }
         catch (Exception ex)
         {
+            _lifecycleProbe?.Ready.TrySetException(ex);
             failed = true;
             Debug.WriteLine($"[ScreenCapture] Error in capture loop: {ex.Message}");
             DestroyCurrentWindow();
@@ -345,7 +349,7 @@ public sealed class ScreenCaptureWindow : IDisposable
         Debug.WriteLine($"[ScreenCapture] Desktop captured: {_desktopWidth}×{_desktopHeight} at ({_virtualLeft},{_virtualTop})");
     }
 
-    private void CreateOverlayWindow()
+    private void CreateCaptureWindow(bool isMessageOnly)
     {
         _wndProc = WndProc;
 
@@ -359,19 +363,32 @@ public sealed class ScreenCaptureWindow : IDisposable
             hCursor = LoadCursor(IntPtr.Zero, 32515), // IDC_CROSS
         };
 
-        RegisterClassEx(ref wc);
+        if (RegisterClassEx(ref wc) == 0)
+            throw new InvalidOperationException("Failed to register the screen capture window class.");
 
         var hwnd = CreateWindowEx(
-            WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+            isMessageOnly ? 0 : WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
             _windowClassName,
             "Easydict Screen Capture",
-            WS_POPUP | WS_VISIBLE,
-            _virtualLeft, _virtualTop, _desktopWidth, _desktopHeight,
-            IntPtr.Zero, IntPtr.Zero, wc.hInstance, IntPtr.Zero);
+            isMessageOnly ? 0 : WS_POPUP | WS_VISIBLE,
+            isMessageOnly ? 0 : _virtualLeft,
+            isMessageOnly ? 0 : _virtualTop,
+            isMessageOnly ? 0 : _desktopWidth,
+            isMessageOnly ? 0 : _desktopHeight,
+            isMessageOnly ? (nint)HwndMessage : IntPtr.Zero,
+            IntPtr.Zero,
+            wc.hInstance,
+            IntPtr.Zero);
+
+        if (hwnd == IntPtr.Zero)
+            throw new InvalidOperationException("Failed to create the screen capture window.");
 
         Volatile.Write(ref _hwnd, hwnd);
-        SetForegroundWindow(hwnd);
-        SetFocus(hwnd);
+        if (!isMessageOnly)
+        {
+            SetForegroundWindow(hwnd);
+            SetFocus(hwnd);
+        }
     }
 
     private nint WndProc(nint hwnd, uint msg, nint wParam, nint lParam)

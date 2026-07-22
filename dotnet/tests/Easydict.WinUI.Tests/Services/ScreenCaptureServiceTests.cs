@@ -69,12 +69,9 @@ public class ScreenCaptureServiceTests
         }
     }
 
-    [SkippableFact]
-    public async Task CancelCurrentCapture_TerminatesReadyOverlay()
+    [Fact]
+    public async Task CancelCurrentCapture_TerminatesReadyWindow()
     {
-        Skip.IfNot(Environment.UserInteractive,
-            "Screen capture overlay requires an interactive Windows desktop");
-
         var probe = new ScreenCaptureLifecycleProbe();
         var service = new ScreenCaptureService(() => new ScreenCaptureWindow(probe));
         var captureTask = service.CaptureRegionAsync();
@@ -88,7 +85,7 @@ public class ScreenCaptureServiceTests
 
             var result = await captureTask.WaitAsync(TestTimeout);
             result.Should().BeNull(
-                "CancelCurrentCapture posts WM_USER_CANCEL to the ready overlay");
+                "CancelCurrentCapture posts WM_USER_CANCEL to the ready capture window");
             await probe.Closed.Task.WaitAsync(TestTimeout);
             ScreenCaptureService.IsCaptureInProgress.Should().BeFalse();
         }
@@ -99,12 +96,9 @@ public class ScreenCaptureServiceTests
         }
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task CaptureRegionAsync_TokenCancellationReleasesSemaphore()
     {
-        Skip.IfNot(Environment.UserInteractive,
-            "Screen capture overlay requires an interactive Windows desktop");
-
         var probes = new Queue<ScreenCaptureLifecycleProbe>([
             new ScreenCaptureLifecycleProbe(),
             new ScreenCaptureLifecycleProbe()

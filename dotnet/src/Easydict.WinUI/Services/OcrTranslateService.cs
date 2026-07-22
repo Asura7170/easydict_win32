@@ -12,7 +12,6 @@ public sealed class OcrTranslateService
     private readonly ScreenCaptureService _captureService = new();
     private readonly DispatcherQueue _dispatcherQueue;
 
-    internal static volatile bool OcrCaptureInProgress;
 
     // Concurrency guard: only one OCR operation can run at a time.
     // Owned by RunOcrPipelineAsync — only that method creates and disposes.
@@ -78,15 +77,9 @@ public sealed class OcrTranslateService
     {
         using var cts = new CancellationTokenSource();
         var previousCts = Interlocked.Exchange(ref _currentCts, cts);
-        if (previousCts != null)
-        {
-            previousCts.Cancel();
-            _captureService.CancelCurrentCapture();
-        }
-
-        OcrCaptureInProgress = true;
         try
         {
+            CancelPreviousOperation(previousCts);
             var capture = await _captureService.CaptureRegionAsync(cts.Token).ConfigureAwait(false);
             if (capture is null) return null;
 
@@ -139,11 +132,19 @@ public sealed class OcrTranslateService
         }
         finally
         {
-            // Atomically swap out our CTS and reflect whether another pipeline has
-            // queued in the meantime (its CTS was already atomically swapped in
-            // before ours was cancelled, so _currentCts is never null while a stale
-            // finally runs — it's always the alive caller's CTS or a newer one).
-            OcrCaptureInProgress = Interlocked.CompareExchange(ref _currentCts, null, cts) != cts;
+            Interlocked.CompareExchange(ref _currentCts, null, cts);
+        }
+    }
+
+    internal static void CancelPreviousOperation(CancellationTokenSource? previousCts)
+    {
+        try
+        {
+            previousCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The previous operation owner completed between the exchange and cancellation.
         }
     }
 

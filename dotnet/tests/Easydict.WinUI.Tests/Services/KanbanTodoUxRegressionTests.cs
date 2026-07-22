@@ -433,9 +433,49 @@ public class KanbanTodoUxRegressionTests
             "the helper should expose a way to preserve foreground activation permission while WM_HOTKEY is still active");
         hotkeyServiceCode.Should().Contain("ForegroundWindowHelper.AllowCurrentProcessToSetForeground(\"Hotkey\")",
             "the hotkey dispatcher should preserve foreground activation permission before any async hotkey handler yields");
-        appCode.Should().Contain(
-            "TextSelectionService.GetSelectedTextAsync()",
-            "the hotkey handlers should fetch selected text before showing the MiniWindow or FixedWindow");
+
+        var miniHotkeySnippet = ExtractSnippet(
+            appCode,
+            "private async void OnShowMiniWindowHotkey()",
+            "private async void OnShowFixedWindowHotkey()");
+        var fixedHotkeySnippet = ExtractSnippet(
+            appCode,
+            "private async void OnShowFixedWindowHotkey()",
+            "private void OnToggleMiniWindowHotkey()");
+
+        AssertContainsInOrder(
+            miniHotkeySnippet,
+            "TextInsertionService.CaptureSourceWindow();",
+            "TextSelectionService.GetSelectedTextAsync();",
+            "the Mini Window hotkey must capture the source before reading selected text");
+        AssertContainsInOrder(
+            miniHotkeySnippet,
+            "TextSelectionService.GetSelectedTextAsync();",
+            "_window?.DispatcherQueue.TryEnqueue",
+            "the Mini Window hotkey must read selected text before dispatching the window show");
+        miniHotkeySnippet.Should().Contain("await Task.Delay(150);",
+            "the Mini Window hotkey should preserve its existing delayed selection flow");
+        miniHotkeySnippet.Should().Contain("MiniWindowService.Instance.ShowWithText(text)");
+        miniHotkeySnippet.Should().Contain("MiniWindowService.Instance.Show()");
+        miniHotkeySnippet.Should().NotContain("FixedWindowService.Instance.ShowWithText(text)");
+        miniHotkeySnippet.Should().NotContain("FixedWindowService.Instance.Show()");
+
+        AssertContainsInOrder(
+            fixedHotkeySnippet,
+            "TextInsertionService.CaptureSourceWindow();",
+            "TextSelectionService.GetSelectedTextAsync();",
+            "the Fixed Window hotkey must capture the source before reading selected text");
+        AssertContainsInOrder(
+            fixedHotkeySnippet,
+            "TextSelectionService.GetSelectedTextAsync();",
+            "_window?.DispatcherQueue.TryEnqueue",
+            "the Fixed Window hotkey must read selected text before dispatching the window show");
+        fixedHotkeySnippet.Should().Contain("await Task.Delay(150);",
+            "the Fixed Window hotkey should preserve its existing delayed selection flow");
+        fixedHotkeySnippet.Should().Contain("FixedWindowService.Instance.ShowWithText(text)");
+        fixedHotkeySnippet.Should().Contain("FixedWindowService.Instance.Show()");
+        fixedHotkeySnippet.Should().NotContain("MiniWindowService.Instance.ShowWithText(text)");
+        fixedHotkeySnippet.Should().NotContain("MiniWindowService.Instance.Show()");
     }
 
     private static string FindProjectRoot()

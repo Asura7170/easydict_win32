@@ -1,4 +1,5 @@
 using Easydict.WinUI.Services;
+using Easydict.WinUI.Services.ScreenCapture;
 using FluentAssertions;
 using Xunit;
 
@@ -7,6 +8,8 @@ namespace Easydict.WinUI.Tests.Services;
 [Trait("Category", "WinUI")]
 public class ScreenCaptureServiceTests
 {
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
+
     [Fact]
     public void CancelCurrentCapture_DoesNotThrow_WhenIdle()
     {
@@ -32,65 +35,106 @@ public class ScreenCaptureServiceTests
         exception.Should()
             .BeAssignableTo<OperationCanceledException>(
                 "WaitAsync must propagate cancellation before semaphore entry");
+        ScreenCaptureService.IsCaptureInProgress.Should().BeFalse();
     }
 
     [Fact]
-    public async Task CaptureRegionAsync_SemaphoreSurvivesCancellationCycle()
+    public async Task CaptureRegionAsync_PreWindowCancellation_ClosesBeforeReturning()
     {
-        // Regression: Bug 2 (Silent OCR second invocation deadlock).
-        // If the semaphore leaks after any cancellation, subsequent calls hang.
-        // Run three capture→cancel cycles sequentially; each must complete.
-        var service = new ScreenCaptureService();
+        using var gate = new ManualResetEventSlim(false);
+        using var cts = new CancellationTokenSource();
+        var probe = new ScreenCaptureLifecycleProbe { BeforeCaptureGate = gate };
+        var service = new ScreenCaptureService(() => new ScreenCaptureWindow(probe));
+        var captureTask = service.CaptureRegionAsync(cts.Token);
 
-        for (var i = 0; i < 3; i++)
+        try
         {
-            using var cts = new CancellationTokenSource(5000);
-            var task = service.CaptureRegionAsync(cts.Token);
-            await Task.Yield(); // let the STA thread spin up
-            service.CancelCurrentCapture();
-            await task.WaitAsync(cts.Token);
+            await probe.ThreadStarted.Task.WaitAsync(TestTimeout);
+            ScreenCaptureService.IsCaptureInProgress.Should().BeTrue();
+
+            cts.Cancel();
+            gate.Set();
+
+            var result = await captureTask.WaitAsync(TestTimeout);
+            result.Should().BeNull();
+            probe.Closed.Task.IsCompleted.Should().BeTrue(
+                "capture completion must follow STA cleanup");
+            ScreenCaptureService.IsCaptureInProgress.Should().BeFalse();
+        }
+        finally
+        {
+            cts.Cancel();
+            gate.Set();
+            await captureTask.WaitAsync(TestTimeout);
         }
     }
 
-    [Fact]
-    public async Task CaptureRegionAsync_TokenCancellationReleasesSemaphore()
+    [SkippableFact]
+    public async Task CancelCurrentCapture_TerminatesReadyOverlay()
     {
-        // Regression: Bug 2 — token cancellation, like CancelCurrentCapture,
-        // must release the semaphore so a queued caller doesn't deadlock.
-        using var ctsA = new CancellationTokenSource();
-        var service = new ScreenCaptureService();
+        Skip.IfNot(Environment.UserInteractive,
+            "Screen capture overlay requires an interactive Windows desktop");
 
-        var taskA = service.CaptureRegionAsync(ctsA.Token);
-        await Task.Yield();
-        ctsA.Cancel();
+        var probe = new ScreenCaptureLifecycleProbe();
+        var service = new ScreenCaptureService(() => new ScreenCaptureWindow(probe));
+        var captureTask = service.CaptureRegionAsync();
 
-        try { await taskA; } catch (OperationCanceledException) { }
+        try
+        {
+            await probe.Ready.Task.WaitAsync(TestTimeout);
+            ScreenCaptureService.IsCaptureInProgress.Should().BeTrue();
 
-        using var ctsB = new CancellationTokenSource(5000);
-        await service
-            .CaptureRegionAsync(ctsB.Token)
-            .WaitAsync(ctsB.Token);
+            service.CancelCurrentCapture();
+
+            var result = await captureTask.WaitAsync(TestTimeout);
+            result.Should().BeNull(
+                "CancelCurrentCapture posts WM_USER_CANCEL to the ready overlay");
+            await probe.Closed.Task.WaitAsync(TestTimeout);
+            ScreenCaptureService.IsCaptureInProgress.Should().BeFalse();
+        }
+        finally
+        {
+            service.CancelCurrentCapture();
+            await captureTask.WaitAsync(TestTimeout);
+        }
     }
 
-    [Fact]
-    public async Task CancelCurrentCapture_TerminatesActiveCapture()
+    [SkippableFact]
+    public async Task CaptureRegionAsync_TokenCancellationReleasesSemaphore()
     {
-        // Regression: Bug 3 (pop button fired during OCR capture).
-        // CancelCurrentCapture must terminate the overlay via WM_USER_CANCEL
-        // so that RunOcrPipelineAsync's CTS cancellation actually tears down
-        // the capture and releases the semaphore.
-        using var cts = new CancellationTokenSource(10000);
-        var service = new ScreenCaptureService();
+        Skip.IfNot(Environment.UserInteractive,
+            "Screen capture overlay requires an interactive Windows desktop");
 
-        var task = service.CaptureRegionAsync(cts.Token);
-        await Task.Yield(); // let overlay initialize
+        var probes = new Queue<ScreenCaptureLifecycleProbe>([
+            new ScreenCaptureLifecycleProbe(),
+            new ScreenCaptureLifecycleProbe()
+        ]);
+        var service = new ScreenCaptureService(
+            () => new ScreenCaptureWindow(probes.Dequeue()));
 
-        service.CancelCurrentCapture();
+        foreach (var probe in probes.ToArray())
+        {
+            using var cts = new CancellationTokenSource();
+            var captureTask = service.CaptureRegionAsync(cts.Token);
 
-        // The task must complete (not hang) — result is null because we
-        // cancelled, not because the overlay never opened.
-        var result = await task.WaitAsync(cts.Token);
-        result.Should().BeNull(
-            "CancelCurrentCapture must terminate the overlay via WM_USER_CANCEL");
+            try
+            {
+                await probe.Ready.Task.WaitAsync(TestTimeout);
+                ScreenCaptureService.IsCaptureInProgress.Should().BeTrue();
+
+                cts.Cancel();
+
+                var result = await captureTask.WaitAsync(TestTimeout);
+                result.Should().BeNull();
+                await probe.Closed.Task.WaitAsync(TestTimeout);
+                ScreenCaptureService.IsCaptureInProgress.Should().BeFalse();
+            }
+            finally
+            {
+                cts.Cancel();
+                service.CancelCurrentCapture();
+                await captureTask.WaitAsync(TestTimeout);
+            }
+        }
     }
 }

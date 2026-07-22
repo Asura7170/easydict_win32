@@ -102,10 +102,16 @@ public sealed class ScreenCaptureWindow : IDisposable
     // Drag threshold in pixels — must move beyond this to start free-form selection
     private const int DragThreshold = 5;
 
-    // Result
+    // Result and lifecycle
     private TaskCompletionSource<ScreenCaptureResult?>? _resultTcs;
+    private ScreenCaptureResult? _captureResult;
     private CancellationTokenRegistration _cancellationReg;
-    private bool _disposed;
+    private readonly object _lifecycleLock = new();
+    private readonly ScreenCaptureLifecycleProbe? _lifecycleProbe;
+    private int _cancellationRequested;
+    private int _captureStarted;
+    private int _cleanupCompleted;
+    private int _disposed;
 
     // Tips rendering
     private SafeGdiObjectHandle? _tipsFont;
@@ -153,61 +159,85 @@ public sealed class ScreenCaptureWindow : IDisposable
         public uint time;
         public POINT pt;
     }
+    public ScreenCaptureWindow()
+    {
+    }
+
+    internal ScreenCaptureWindow(ScreenCaptureLifecycleProbe lifecycleProbe)
+    {
+        _lifecycleProbe = lifecycleProbe;
+    }
 
     /// <summary>
     /// Shows the capture overlay and waits for the user to select a region.
-    /// Returns null if the user cancels. This runs a message loop and should be
-    /// called from a thread that can pump messages (typically a dedicated STA thread
-    /// so the UI thread is NOT blocked).
-    /// <paramref name="cancellationToken"/> tears down the overlay without returning a result.
+    /// Returns null if the user cancels, after the overlay and GDI resources have been torn down.
+    /// This runs a message loop on a dedicated STA thread so the UI thread is not blocked.
     /// </summary>
     public Task<ScreenCaptureResult?> CaptureAsync(CancellationToken cancellationToken = default)
     {
-        _resultTcs = new TaskCompletionSource<ScreenCaptureResult?>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-
-        if (cancellationToken.CanBeCanceled)
+        lock (_lifecycleLock)
         {
-            _cancellationReg = cancellationToken.Register(() =>
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+
+            if (Interlocked.Exchange(ref _captureStarted, 1) != 0)
+                throw new InvalidOperationException("A screen capture can only be started once.");
+
+            _resultTcs = new TaskCompletionSource<ScreenCaptureResult?>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
+            if (cancellationToken.CanBeCanceled)
+                _cancellationReg = cancellationToken.Register(RequestCancellation);
+
+            // Run the capture on a dedicated STA thread so the main UI thread stays responsive.
+            var thread = new Thread(RunCaptureLoop)
             {
-                if (_hwnd != IntPtr.Zero)
-                    PostMessage(_hwnd, WM_USER_CANCEL, 0, 0);
-                else
-                    _resultTcs?.TrySetResult(null);
-            });
+                IsBackground = true,
+                Name = "ScreenCaptureThread"
+            };
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+
+            return _resultTcs.Task;
         }
-
-        // Run the capture on a dedicated STA thread so the main UI thread stays responsive
-        var thread = new Thread(RunCaptureLoop)
-        {
-            IsBackground = true,
-            Name = "ScreenCaptureThread"
-        };
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-
-        return _resultTcs.Task;
     }
 
     private void RunCaptureLoop()
     {
+        var failed = false;
         try
         {
+            _lifecycleProbe?.ThreadStarted.TrySetResult();
+            _lifecycleProbe?.BeforeCaptureGate?.Wait();
+
+            if (Volatile.Read(ref _cancellationRequested) != 0)
+                return;
+
             CaptureDesktop();
+
+            if (Volatile.Read(ref _cancellationRequested) != 0)
+                return;
+
             CreateOverlayWindow();
 
-            // If the token was cancelled before the window was created, the
-            // callback already completed _resultTcs with null. Tear down the
-            // now-stray overlay immediately instead of entering the message loop.
-            if (_resultTcs?.Task.IsCompleted == true)
+            if (Volatile.Read(ref _cancellationRequested) != 0)
             {
-                DestroyWindow(_hwnd);
-                _hwnd = IntPtr.Zero;
+                DestroyCurrentWindow();
                 return;
             }
 
-            _windowDetector.TakeSnapshot(_hwnd);
-            InitializeTips();
+            if (_lifecycleProbe is null)
+            {
+                _windowDetector.TakeSnapshot(Volatile.Read(ref _hwnd));
+                InitializeTips();
+            }
+
+            if (Volatile.Read(ref _cancellationRequested) != 0)
+            {
+                DestroyCurrentWindow();
+                return;
+            }
+
+            _lifecycleProbe?.Ready.TrySetResult();
 
             // Win32 message loop
             while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
@@ -218,24 +248,38 @@ public sealed class ScreenCaptureWindow : IDisposable
         }
         catch (Exception ex)
         {
+            failed = true;
             Debug.WriteLine($"[ScreenCapture] Error in capture loop: {ex.Message}");
-            _resultTcs?.TrySetResult(null);
+            DestroyCurrentWindow();
         }
         finally
         {
             Cleanup();
+            _lifecycleProbe?.Closed.TrySetResult();
+            _resultTcs?.TrySetResult(
+                Volatile.Read(ref _cancellationRequested) != 0 || failed ? null : _captureResult);
         }
     }
 
     /// <summary>
     /// Cancels the capture overlay from any thread. Safe to call after capture completes (no-op).
     /// </summary>
-    public void Cancel()
+    public void Cancel() => RequestCancellation();
+
+    private void RequestCancellation()
     {
-        if (_hwnd != IntPtr.Zero)
-            PostMessage(_hwnd, WM_USER_CANCEL, 0, 0);
-        else
-            _resultTcs?.TrySetResult(null);
+        Interlocked.Exchange(ref _cancellationRequested, 1);
+
+        var hwnd = Volatile.Read(ref _hwnd);
+        if (hwnd != IntPtr.Zero)
+            PostMessage(hwnd, WM_USER_CANCEL, 0, 0);
+    }
+
+    private void DestroyCurrentWindow()
+    {
+        var hwnd = Volatile.Read(ref _hwnd);
+        if (hwnd != IntPtr.Zero)
+            DestroyWindow(hwnd);
     }
 
     private void CaptureDesktop()
@@ -317,7 +361,7 @@ public sealed class ScreenCaptureWindow : IDisposable
 
         RegisterClassEx(ref wc);
 
-        _hwnd = CreateWindowEx(
+        var hwnd = CreateWindowEx(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
             _windowClassName,
             "Easydict Screen Capture",
@@ -325,8 +369,9 @@ public sealed class ScreenCaptureWindow : IDisposable
             _virtualLeft, _virtualTop, _desktopWidth, _desktopHeight,
             IntPtr.Zero, IntPtr.Zero, wc.hInstance, IntPtr.Zero);
 
-        SetForegroundWindow(_hwnd);
-        SetFocus(_hwnd);
+        Volatile.Write(ref _hwnd, hwnd);
+        SetForegroundWindow(hwnd);
+        SetFocus(hwnd);
     }
 
     private nint WndProc(nint hwnd, uint msg, nint wParam, nint lParam)
@@ -422,6 +467,7 @@ public sealed class ScreenCaptureWindow : IDisposable
                 return DefWindowProc(hwnd, msg, wParam, lParam);
 
             case WM_DESTROY:
+                Volatile.Write(ref _hwnd, IntPtr.Zero);
                 PostQuitMessage(0);
                 return IntPtr.Zero;
 
@@ -864,17 +910,12 @@ public sealed class ScreenCaptureWindow : IDisposable
             return;
         }
 
-        // Extract pixels from frozen desktop bitmap
-        var result = ExtractRegion(sel);
-        _resultTcs?.TrySetResult(result);
-        DestroyWindow(_hwnd);
+        // Extract pixels from frozen desktop bitmap.
+        _captureResult = ExtractRegion(sel);
+        DestroyCurrentWindow();
     }
 
-    private void CancelCapture()
-    {
-        _resultTcs?.TrySetResult(null);
-        DestroyWindow(_hwnd);
-    }
+    private void CancelCapture() => DestroyCurrentWindow();
 
     /// <summary>
     /// Show a confirmation dialog before cancelling. If user says Yes, cancel.
@@ -993,6 +1034,9 @@ public sealed class ScreenCaptureWindow : IDisposable
 
     private void Cleanup()
     {
+        if (Interlocked.Exchange(ref _cleanupCompleted, 1) != 0)
+            return;
+
         _cancellationReg.Dispose();
 
         // Release cached tips DC/bitmap
@@ -1048,9 +1092,16 @@ public sealed class ScreenCaptureWindow : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        Cleanup();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        RequestCancellation();
+
+        lock (_lifecycleLock)
+        {
+            if (Volatile.Read(ref _captureStarted) == 0)
+                Cleanup();
+        }
     }
 
     // --- P/Invoke declarations ---
@@ -1169,4 +1220,18 @@ public sealed class ScreenCaptureWindow : IDisposable
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int MessageBoxW(nint hwnd, string text, string caption, uint type);
     [DllImport("msimg32.dll")] private static extern bool AlphaBlend(nint hdcDest, int xoriginDest, int yoriginDest, int wDest, int hDest, nint hdcSrc, int xoriginSrc, int yoriginSrc, int wSrc, int hSrc, BLENDFUNCTION ftn);
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(nint hwnd);
+}
+
+internal sealed class ScreenCaptureLifecycleProbe
+{
+    public TaskCompletionSource ThreadStarted { get; } =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public TaskCompletionSource Ready { get; } =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public TaskCompletionSource Closed { get; } =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public ManualResetEventSlim? BeforeCaptureGate { get; init; }
 }

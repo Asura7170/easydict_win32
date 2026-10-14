@@ -53,12 +53,12 @@ public sealed class StartupServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Disable_RemovesTheEntry()
+    public async Task Disable_AfterEnabled_ReportsNotRunning_AndRemovesValue()
     {
         (await StartupService.SetEnabledAsync(true)).Should().BeTrue();
         ReadValue().Should().NotBeNull();
 
-        (await StartupService.SetEnabledAsync(false)).Should().BeTrue();
+        (await StartupService.SetEnabledAsync(false)).Should().BeFalse();
 
         ReadValue().Should().BeNull();
     }
@@ -70,7 +70,7 @@ public sealed class StartupServiceTests : IDisposable
 
         var effective = await StartupService.SetEnabledAsync(false);
 
-        effective.Should().BeTrue();
+        effective.Should().BeFalse();
     }
 
     private static string? ReadValue()

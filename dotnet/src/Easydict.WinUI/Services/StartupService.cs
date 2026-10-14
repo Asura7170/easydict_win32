@@ -22,6 +22,7 @@ public static class StartupService
     /// Windows will actually launch the app at logon. Use the result to reconcile the
     /// settings and the UI: Windows deliberately refuses DisabledByUser re-enables
     /// requested from code (Settings &gt; Startup apps / Task Manager owns that state).
+    /// Returns FALSE after a successful disable.
     /// </summary>
     public static async Task<bool> SetEnabledAsync(bool enabled)
     {
@@ -32,9 +33,9 @@ public static class StartupService
                 return ApplyRunKey(enabled);
             }
 
-            var effective = await ApplyStartupTaskAsync(enabled);
+            // Cleanup first: a cosmetic registry failure must not taint the effective result.
             CleanupLegacyRunKey();
-            return effective;
+            return await ApplyStartupTaskAsync(enabled);
         }
         catch (Exception ex)
         {
@@ -61,12 +62,12 @@ public static class StartupService
 
         if (task.State == StartupTaskState.Disabled)
         {
-            return true;
+            return false;
         }
 
         task.Disable();
         CrashDiagnostics.Log($"[StartupService] StartupTask '{TaskId}' disable -> {task.State}");
-        return !IsEffectiveRunning(task.State);
+        return IsEffectiveRunning(task.State);
     }
 
     private static bool IsEffectiveRunning(StartupTaskState state) => state
@@ -85,7 +86,7 @@ public static class StartupService
         if (!enabled)
         {
             key.DeleteValue(ValueName, throwOnMissingValue: false);
-            return true;
+            return false;
         }
 
         var exePath = Environment.ProcessPath;

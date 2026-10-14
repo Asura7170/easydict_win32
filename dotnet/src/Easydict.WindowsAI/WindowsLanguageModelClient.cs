@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using System.Collections;
 using System.Globalization;
+using System.Reflection;
 using Easydict.WindowsAI.Services;
 using Microsoft.Windows.AI;
 using Microsoft.Windows.AI.Text;
@@ -44,8 +45,26 @@ public sealed class WindowsLanguageModelClient : IWindowsLanguageModelClient
     /// </summary>
     public static Func<string, string?>? HintLocalizer { get; set; }
 
+    // The OS build and the Windows App SDK assembly identity cannot change while
+    // the process runs (an OS update needs a reboot). Activation can: the user
+    // can activate Windows without exiting Easydict. A licensed result stays
+    // cached. An unactivated or unknown result is reused only long enough to
+    // collapse the several probes Settings makes in one open. The WMI query can
+    // take seconds, so it must not run on every probe, and a negative result
+    // must not stick for the life of the process.
+    private static readonly Lazy<WindowsBuildInfo> CachedWindowsBuildInfo =
+        new(TryGetWindowsBuildInfo, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private static readonly Lazy<AssemblyName> CachedLanguageModelAssemblyName =
+        new(() => typeof(LanguageModel).Assembly.GetName(), LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private static readonly object WindowsActivationCacheGate = new();
+    private static bool? _cachedWindowsActivationStatus;
+    private static long _windowsActivationCacheExpiresAtTick;
+    private const int NegativeWindowsActivationCacheMilliseconds = 2_000;
+
     public WindowsLanguageModelClient()
-        : this(TryGetWindowsBuildInfo, TryGetRawReadyState)
+        : this(() => CachedWindowsBuildInfo.Value, TryGetRawReadyState)
     {
     }
 
@@ -111,7 +130,7 @@ public sealed class WindowsLanguageModelClient : IWindowsLanguageModelClient
                 ProcessArchitecture: RuntimeInformation.ProcessArchitecture.ToString(),
                 BackendName: "PhiSilica",
                 ComponentMarker: "Microsoft.Windows.AI.Text; readyState=not-probed",
-                WindowsActivated: TryGetWindowsActivationStatus(),
+                WindowsActivated: GetWindowsActivationStatus(),
                 PhiSilicaAiComponentsPresent: null);
         }
 
@@ -122,7 +141,7 @@ public sealed class WindowsLanguageModelClient : IWindowsLanguageModelClient
         WindowsBuildInfo buildInfo,
         AIFeatureReadyState? rawReadyState)
     {
-        var languageModelAssembly = typeof(LanguageModel).Assembly.GetName();
+        var languageModelAssembly = CachedLanguageModelAssemblyName.Value;
         return new WindowsAIHealthFingerprint(
             OsBuild: FormatFullWindowsBuild(buildInfo.CurrentBuild, buildInfo.Ubr, Environment.OSVersion.Version),
             Ubr: buildInfo.Ubr,
@@ -130,7 +149,7 @@ public sealed class WindowsLanguageModelClient : IWindowsLanguageModelClient
             ProcessArchitecture: RuntimeInformation.ProcessArchitecture.ToString(),
             BackendName: "PhiSilica",
             ComponentMarker: FormatComponentMarker(languageModelAssembly.Name, rawReadyState),
-            WindowsActivated: TryGetWindowsActivationStatus(),
+            WindowsActivated: GetWindowsActivationStatus(),
             PhiSilicaAiComponentsPresent: TryGetPhiSilicaAiComponentsPresence(rawReadyState));
     }
 
@@ -139,6 +158,9 @@ public sealed class WindowsLanguageModelClient : IWindowsLanguageModelClient
         CancellationToken cancellationToken,
         IProgress<double>? progress = null)
     {
+        // The button that starts preparation is itself a status retry. A cached
+        // "not activated" result from the Settings open must not decide it.
+        InvalidateNegativeWindowsActivationCache();
         var initialState = GetReadyState();
         if (initialState != WindowsAIReadyState.NotReady)
         {
@@ -158,6 +180,9 @@ public sealed class WindowsLanguageModelClient : IWindowsLanguageModelClient
             return WindowsAIReadyState.Ready;
         }
 
+        // Preparation can finish after the user activates Windows. Drop a cached
+        // "not activated" result before this status retry so it cannot stick.
+        InvalidateNegativeWindowsActivationCache();
         var refreshedState = GetReadyState();
         if (refreshedState == WindowsAIReadyState.Ready)
         {
@@ -305,7 +330,7 @@ public sealed class WindowsLanguageModelClient : IWindowsLanguageModelClient
 
     private static int? TryGetUbr()
     {
-        return TryGetWindowsBuildInfo().Ubr;
+        return CachedWindowsBuildInfo.Value.Ubr;
     }
 
     private static WindowsBuildInfo TryGetWindowsBuildInfo()
@@ -395,6 +420,42 @@ public sealed class WindowsLanguageModelClient : IWindowsLanguageModelClient
             AIFeatureReadyState.OSUpdateNeeded => false,
             _ => null,
         };
+    }
+
+    private static bool? GetWindowsActivationStatus()
+    {
+        lock (WindowsActivationCacheGate)
+        {
+            if (_windowsActivationCacheExpiresAtTick != 0
+                && Environment.TickCount64 < _windowsActivationCacheExpiresAtTick)
+            {
+                return _cachedWindowsActivationStatus;
+            }
+
+            var status = TryGetWindowsActivationStatus();
+            _cachedWindowsActivationStatus = status;
+            // LicenseStatus=1 does not revert without an admin change, and a
+            // stale "activated" reading does not report UnsupportedWindowsBaseline.
+            // false and null must expire so a later probe can see activation.
+            _windowsActivationCacheExpiresAtTick = status == true
+                ? long.MaxValue
+                : Environment.TickCount64 + NegativeWindowsActivationCacheMilliseconds;
+            return status;
+        }
+    }
+
+    private static void InvalidateNegativeWindowsActivationCache()
+    {
+        lock (WindowsActivationCacheGate)
+        {
+            if (_cachedWindowsActivationStatus == true
+                && _windowsActivationCacheExpiresAtTick == long.MaxValue)
+            {
+                return;
+            }
+
+            _windowsActivationCacheExpiresAtTick = 0;
+        }
     }
 
     private static bool? TryGetWindowsActivationStatus()
@@ -513,7 +574,7 @@ public sealed class WindowsLanguageModelClient : IWindowsLanguageModelClient
 
     private static void AddEnvironmentFingerprint(List<string> diagnostics)
     {
-        var buildInfo = TryGetWindowsBuildInfo();
+        var buildInfo = CachedWindowsBuildInfo.Value;
         diagnostics.Add($"osBuild={FormatFullWindowsBuild(buildInfo.CurrentBuild, buildInfo.Ubr, Environment.OSVersion.Version)}");
         diagnostics.Add($"processArch={System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
     }

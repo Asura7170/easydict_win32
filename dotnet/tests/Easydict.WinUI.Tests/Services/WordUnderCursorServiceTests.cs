@@ -27,6 +27,36 @@ public class WordUnderCursorServiceTests
     }
 
     [Theory]
+    [InlineData("HeIlo", "Hello")]
+    [InlineData("WiIl", "Will")]
+    [InlineData("lt", "It")]
+    [InlineData("lsland", "Island")]
+    [InlineData("l", "I")]
+    [InlineData("I", "I")]
+    [InlineData("l'm", "I'm")]
+    [InlineData("l'll", "I'll")]
+    [InlineData("l’ll", "I’ll")]
+    [InlineData("I'll", "I'll")]
+    [InlineData("I’ll", "I’ll")]
+    [InlineData("l've", "I've")]
+    [InlineData("l'd", "I'd")]
+    [InlineData("l'homme", "l'homme")]
+    [InlineData("l'amour", "l'amour")]
+    [InlineData("l'eau", "l'eau")]
+    [InlineData("MlCROSOFT", "MICROSOFT")]
+    [InlineData("like", "like")]
+    [InlineData("Island", "Island")]
+    [InlineData("McIntosh", "McIntosh")]
+    [InlineData("hello", "hello")]
+    [InlineData("mp3", "mp3")]
+    [InlineData("naïve", "naïve")]
+    [InlineData("你好", "你好")]
+    public void FixIlConfusion_CorrectsOcrLookalikes(string raw, string expected)
+    {
+        WordUnderCursorService.FixIlConfusion(raw).Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]

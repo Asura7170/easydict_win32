@@ -17,6 +17,7 @@ namespace Easydict.WinUI.Tests.Services;
 public sealed class StartupServiceTests : IDisposable
 {
     private const string TestValueName = "EasydictStartupTests";
+    private readonly string _originalValueName = StartupService.ValueName;
 
     public StartupServiceTests()
     {
@@ -26,7 +27,7 @@ public sealed class StartupServiceTests : IDisposable
 
     public void Dispose()
     {
-        StartupService.ValueName = "Easydict";
+        StartupService.ValueName = _originalValueName;
         DisposeValue();
     }
 
@@ -71,6 +72,21 @@ public sealed class StartupServiceTests : IDisposable
         var effective = await StartupService.SetEnabledAsync(false);
 
         effective.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Enable_WithStalePathValue_RewritesToCurrentExe()
+    {
+        // Migration case: the Run value points at an old portable install.
+        using (var key = Registry.CurrentUser.OpenSubKey(StartupService.RegistryPath, true))
+        {
+            key.Should().NotBeNull();
+            key?.SetValue(TestValueName, "\"C:\\old\\Easydict.exe\"");
+        }
+
+        await StartupService.SetEnabledAsync(true);
+
+        ReadValue().Should().Be($"\"{Environment.ProcessPath}\"");
     }
 
     private static string? ReadValue()

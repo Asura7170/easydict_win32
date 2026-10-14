@@ -34,13 +34,30 @@ public static class StartupService
             }
 
             // Cleanup first: a cosmetic registry failure must not taint the effective result.
-            CleanupLegacyRunKey();
+            try
+            {
+                CleanupLegacyRunKey();
+            }
+            catch (Exception ex)
+            {
+                CrashDiagnostics.Log($"[StartupService] Legacy Run-key cleanup failed: {ex.Message}");
+            }
             return await ApplyStartupTaskAsync(enabled);
         }
         catch (Exception ex)
         {
             CrashDiagnostics.Log($"[StartupService] SetEnabledAsync({enabled}) failed: {ex.Message}");
-            return false;
+            // Report the ACTUAL effective state instead of a silent false: a failed
+            // disable must not be mistaken for a successful one.
+            try
+            {
+                var task = await StartupTask.GetAsync(TaskId);
+                return IsEffectiveRunning(task.State);
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 
@@ -60,8 +77,10 @@ public static class StartupService
             return IsEffectiveRunning(result);
         }
 
-        if (task.State == StartupTaskState.Disabled)
+        if (!IsEffectiveRunning(task.State))
         {
+            // Disabled/DisabledByUser/DisabledByPolicy: already off; Windows documents no
+            // behavior for Disable() on the states it owns, so never call it there.
             return false;
         }
 

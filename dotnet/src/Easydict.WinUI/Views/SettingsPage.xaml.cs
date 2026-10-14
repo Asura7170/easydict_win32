@@ -4787,6 +4787,7 @@ public sealed partial class SettingsPage : Page
         if (startupEffective != requestedStartupSetting)
         {
             CrashDiagnostics.Log($"[SettingsPage] Startup setting reconciled to {startupEffective}");
+            var wasLoading = _isLoading;
             _isLoading = true;
             try
             {
@@ -4795,7 +4796,7 @@ public sealed partial class SettingsPage : Page
             }
             finally
             {
-                _isLoading = false;
+                _isLoading = wasLoading;
             }
         }
 

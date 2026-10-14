@@ -4778,8 +4778,26 @@ public sealed partial class SettingsPage : Page
         _settings.HideEmptyServiceResults = HideEmptyServiceResultsToggle.IsOn;
         _settings.EnableLocalDictionarySuggestions = EnableLocalDictionarySuggestionsToggle.IsOn;
 
-        // Apply startup setting to Windows registry
-        StartupService.SetEnabled(_settings.LaunchAtStartup);
+        // Apply startup setting to Windows (StartupTask on MSIX builds, Run key on portable).
+        // Reconcile when Windows refuses the request (DisabledByUser via Task Manager,
+        // policy, or unwritable Run key) so the toggle never claims a state the OS
+        // will not honor.
+        var requestedStartupSetting = _settings.LaunchAtStartup;
+        var startupEffective = await StartupService.SetEnabledAsync(requestedStartupSetting);
+        if (startupEffective != requestedStartupSetting)
+        {
+            CrashDiagnostics.Log($"[SettingsPage] Startup setting reconciled to {startupEffective}");
+            _isLoading = true;
+            try
+            {
+                LaunchAtStartupToggle.IsOn = startupEffective;
+                _settings.LaunchAtStartup = startupEffective;
+            }
+            finally
+            {
+                _isLoading = false;
+            }
+        }
 
         // Save hotkey settings
         _settings.ShowWindowHotkey = ShowHotkeyBox.Text;

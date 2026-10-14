@@ -48,9 +48,15 @@ public static class StartupService
         {
             CrashDiagnostics.Log($"[StartupService] SetEnabledAsync({enabled}) failed: {ex.Message}");
             // Report the ACTUAL effective state instead of a silent false: a failed
-            // disable must not be mistaken for a successful one.
+            // disable must not be mistaken for a successful one. Unpackaged builds
+            // have no package identity, so they ask the Run key instead.
             try
             {
+                if (!EasydictConditions.IsPackaged)
+                {
+                    return ReadPendingRunValue();
+                }
+
                 var task = await StartupTask.GetAsync(TaskId);
                 return IsEffectiveRunning(task.State);
             }
@@ -122,6 +128,14 @@ public static class StartupService
             key.SetValue(ValueName, value);
         }
         return true;
+    }
+
+    // The Run-key path's answer lives in the registry itself; querying it needs no
+    // package identity, so it is also the safe fallback inside the catch path.
+    internal static bool ReadPendingRunValue()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RegistryPath, writable: false);
+        return !string.IsNullOrEmpty(key?.GetValue(ValueName) as string);
     }
 
     // Portable legacy installs that were upgraded to the MSIX leave an HKCU Run entry

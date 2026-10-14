@@ -89,6 +89,20 @@ public sealed class StartupServiceTests : IDisposable
         ReadValue().Should().Be($"\"{Environment.ProcessPath}\"");
     }
 
+    [Fact]
+    public void ReadPendingRunValue_ReportsPresence()
+    {
+        StartupService.ReadPendingRunValue().Should().BeFalse();
+
+        using (var key = Registry.CurrentUser.OpenSubKey(StartupService.RegistryPath, true))
+        {
+            key.Should().NotBeNull();
+            key?.SetValue(StartupService.ValueName, "\"C:\\anything.exe\"");
+        }
+
+        StartupService.ReadPendingRunValue().Should().BeTrue();
+    }
+
     private static string? ReadValue()
     {
         using var key = Registry.CurrentUser.OpenSubKey(StartupService.RegistryPath, writable: false);

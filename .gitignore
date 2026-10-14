@@ -88,9 +88,10 @@ get-activation-error.ps1
 test-direct-exe.ps1
 test-release-bin.ps1
 
-# Planning documents
+# Planning and local working notes
 *-plan.md
-
+PLAN.md
+FLUENT2_UI_ACCEPTANCE.md
 CLAUDE.md
 
 .fake

@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>Ihre Einstellungen wurden erfolgreich gespeichert.</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>Die Einstellungen wurden gespeichert. Windows hat den Start nicht aktiviert, weil er im Task-Manager deaktiviert ist. Aktivieren Sie Easydict unter Task-Manager, Autostart von Apps.</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>Die Einstellungen wurden gespeichert. Eine Windows-Richtlinie hält den Start deaktiviert.</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>Die Einstellungen wurden gespeichert. Eine Windows-Richtlinie hält den Start aktiv, daher wurde er nicht deaktiviert.</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>Die Einstellungen wurden gespeichert. Der Starteintrag konnte nicht geschrieben werden.</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>Die Einstellungen wurden gespeichert. Windows hat die Startänderung nicht übernommen.</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>Neustart erforderlich</value>
   </data>

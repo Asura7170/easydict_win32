@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>您的設定已成功儲存。</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>設定已儲存。Windows 未開啟開機啟動，因為該啟動項目已在工作管理員中被停用。請在工作管理員的「啟動應用程式」中啟用 Easydict。</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>設定已儲存。Windows 原則將開機啟動保持為關閉。</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>設定已儲存。Windows 原則將開機啟動保持為開啟，因此未能關閉。</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>設定已儲存。無法寫入開機啟動項目。</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>設定已儲存。Windows 未套用開機啟動的變更。</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>需要重新啟動</value>
   </data>

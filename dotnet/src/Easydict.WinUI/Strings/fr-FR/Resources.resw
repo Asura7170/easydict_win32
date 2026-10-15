@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>Vos paramètres ont été enregistrés avec succès.</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>Les paramètres ont été enregistrés. Windows n'a pas activé le démarrage, car il est désactivé dans le Gestionnaire des tâches. Activez Easydict dans Gestionnaire des tâches, Applications de démarrage.</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>Les paramètres ont été enregistrés. Une stratégie Windows maintient le démarrage désactivé.</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>Les paramètres ont été enregistrés. Une stratégie Windows maintient le démarrage activé, il n'a donc pas été désactivé.</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>Les paramètres ont été enregistrés. L'entrée de démarrage n'a pas pu être écrite.</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>Les paramètres ont été enregistrés. Windows n'a pas appliqué la modification du démarrage.</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>Redémarrage requis</value>
   </data>

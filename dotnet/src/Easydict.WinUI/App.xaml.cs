@@ -105,6 +105,12 @@ namespace Easydict.WinUI
         public static Window? MainWindow => Instance._window;
 
         /// <summary>
+        /// In-flight or completed read of whether Windows will launch the app.
+        /// Null when the read could not be completed. The read does not change startup state.
+        /// </summary>
+        public static Task<bool?> LaunchAtStartupRead { get; private set; } = Task.FromResult<bool?>(null);
+
+        /// <summary>
         /// Opens a saved-items section from any application window without rebuilding the
         /// main window or accumulating duplicate history entries.
         /// </summary>
@@ -201,6 +207,7 @@ namespace Easydict.WinUI
 
         protected override void OnLaunched(LaunchActivatedEventArgs e)
         {
+            LaunchAtStartupRead = ReadLaunchAtStartupAsync();
             CrashDiagnostics.Log($"[OnLaunched] Starting - Args: {e.Arguments}");
             if (EasydictConditions.IsPackaged)
             {
@@ -297,6 +304,15 @@ namespace Easydict.WinUI
             // On first launch this detects China region and switches defaults (Google → Bing).
             // For returning users with saved settings this is a no-op.
             _ = SettingsService.Instance.InitializeRegionDefaultsAsync();
+        }
+
+        private static async Task<bool?> ReadLaunchAtStartupAsync()
+        {
+            var effective = await StartupService.ReadEffectiveEnabledAsync();
+            CrashDiagnostics.Log(effective is bool enabled
+                ? $"[OnLaunched] LaunchAtStartup read from system: {enabled}"
+                : "[OnLaunched] LaunchAtStartup read unavailable");
+            return effective;
         }
 
         private void InitializeServices()

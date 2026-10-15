@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>تم حفظ إعداداتك بنجاح.</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>تم حفظ الإعدادات. لم يفعّل Windows بدء التشغيل لأنه معطّل في إدارة المهام. فعّل Easydict من إدارة المهام، تطبيقات بدء التشغيل.</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>تم حفظ الإعدادات. يُبقي نهج Windows بدء التشغيل متوقفًا.</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>تم حفظ الإعدادات. يُبقي نهج Windows بدء التشغيل مفعّلًا، لذا لم يتم إيقافه.</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>تم حفظ الإعدادات. تعذّر كتابة إدخال بدء التشغيل.</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>تم حفظ الإعدادات. لم يطبّق Windows تغيير بدء التشغيل.</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>يلزم إعادة التشغيل</value>
   </data>

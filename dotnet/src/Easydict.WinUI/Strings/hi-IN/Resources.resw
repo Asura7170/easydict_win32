@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>आपकी सेटिंग्स सफलतापूर्वक सहेजी गई हैं।</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>सेटिंग्स सहेज ली गई हैं। Windows ने स्टार्टअप चालू नहीं किया क्योंकि यह टास्क मैनेजर में बंद है। टास्क मैनेजर के स्टार्टअप ऐप्स में Easydict चालू करें।</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>सेटिंग्स सहेज ली गई हैं। Windows नीति स्टार्टअप को बंद रखती है।</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>सेटिंग्स सहेज ली गई हैं। Windows नीति स्टार्टअप को चालू रखती है, इसलिए उसे बंद नहीं किया गया।</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>सेटिंग्स सहेज ली गई हैं। स्टार्टअप प्रविष्टि लिखी नहीं जा सकी।</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>सेटिंग्स सहेज ली गई हैं। Windows ने स्टार्टअप बदलाव लागू नहीं किया।</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>पुनः आरंभ आवश्यक</value>
   </data>

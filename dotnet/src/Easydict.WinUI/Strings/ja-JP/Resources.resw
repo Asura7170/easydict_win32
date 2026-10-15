@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>設定が正常に保存されました。</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>設定は保存されました。タスク マネージャーでスタートアップが無効になっているため、Windows はスタートアップをオンにしませんでした。タスク マネージャーのスタートアップで Easydict を有効にしてください。</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>設定は保存されました。Windows のポリシーによりスタートアップはオフのままです。</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>設定は保存されました。Windows のポリシーによりスタートアップはオンのままなので、オフにできませんでした。</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>設定は保存されました。スタートアップ項目を書き込めませんでした。</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>設定は保存されました。Windows はスタートアップの変更を適用しませんでした。</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>再起動が必要</value>
   </data>

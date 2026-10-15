@@ -6,7 +6,8 @@
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   xmlns:systemai="http://schemas.microsoft.com/appx/manifest/systemai/windows10"
-  IgnorableNamespaces="uap desktop rescap systemai">
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  IgnorableNamespaces="uap desktop rescap systemai uap5">
 
   <Identity
     Name="xiaocang.EasydictforWindows"
@@ -100,6 +101,13 @@
             <uap:DisplayName>Easydict Protocol</uap:DisplayName>
           </uap:Protocol>
         </uap:Extension>
+        <!-- "Launch at Windows startup" (SettingsPage toggle, applied by StartupService).
+             TaskId must match StartupService.TaskId. -->
+        <uap5:Extension Category="windows.startupTask"
+                        Executable="Easydict.WinUI.exe"
+                        EntryPoint="Windows.FullTrustApplication">
+          <uap5:StartupTask TaskId="EasydictStartup" Enabled="false" DisplayName="Easydict" />
+        </uap5:Extension>
       </Extensions>
     </Application>
   </Applications>

@@ -1,51 +1,153 @@
 using Microsoft.Win32;
+using Windows.ApplicationModel;
 
 namespace Easydict.WinUI.Services;
 
 /// <summary>
-/// Service for managing Windows startup registry entries.
-/// Uses HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run for user-level startup.
+/// Applies the "Launch at Windows startup" setting.
+/// Packaged (MSIX) builds use the manifest-declared windows.startupTask; portable
+/// builds fall back to the classic HKCU...\CurrentVersion\Run registry entry.
 /// </summary>
 public static class StartupService
 {
-    private const string AppName = "Easydict";
-    private const string RegistryPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
+    // Must match TaskId="EasydictStartup" on the uap5:StartupTask in Package.appxmanifest.
+    private const string TaskId = "EasydictStartup";
+
+    // Internal (not const) so Easydict.WinUI.Tests can write under its own value name.
+    internal static string ValueName = "Easydict";
+    internal const string RegistryPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
 
     /// <summary>
-    /// Checks if the application is configured to launch at Windows startup.
+    /// Applies the requested startup state and reports the effective one, i.e. whether
+    /// Windows will actually launch the app at logon. Use the result to reconcile the
+    /// settings and the UI: Windows deliberately refuses DisabledByUser re-enables
+    /// requested from code (Settings &gt; Startup apps / Task Manager owns that state).
+    /// Returns FALSE after a successful disable.
     /// </summary>
-    public static bool IsEnabled()
+    public static async Task<bool> SetEnabledAsync(bool enabled)
     {
-        using var key = Registry.CurrentUser.OpenSubKey(RegistryPath, false);
-        return key?.GetValue(AppName) != null;
+        try
+        {
+            if (!EasydictConditions.IsPackaged)
+            {
+                return ApplyRunKey(enabled);
+            }
+
+            // Cleanup first: a cosmetic registry failure must not taint the effective result.
+            try
+            {
+                CleanupLegacyRunKey();
+            }
+            catch (Exception ex)
+            {
+                CrashDiagnostics.Log($"[StartupService] Legacy Run-key cleanup failed: {ex.Message}");
+            }
+            return await ApplyStartupTaskAsync(enabled);
+        }
+        catch (Exception ex)
+        {
+            CrashDiagnostics.Log($"[StartupService] SetEnabledAsync({enabled}) failed: {ex.Message}");
+            // Report the ACTUAL effective state instead of a silent false: a failed
+            // disable must not be mistaken for a successful one. Unpackaged builds
+            // have no package identity, so they ask the Run key instead.
+            try
+            {
+                if (!EasydictConditions.IsPackaged)
+                {
+                    return ReadPendingRunValue();
+                }
+
+                var task = await StartupTask.GetAsync(TaskId);
+                return IsEffectiveRunning(task.State);
+            }
+            catch
+            {
+                return false;
+            }
+        }
     }
 
-    /// <summary>
-    /// Enables or disables the application's Windows startup entry.
-    /// </summary>
-    /// <param name="enabled">True to enable startup, false to disable.</param>
-    public static void SetEnabled(bool enabled)
+    private static async Task<bool> ApplyStartupTaskAsync(bool enabled)
     {
-        using var key = Registry.CurrentUser.OpenSubKey(RegistryPath, true);
-        if (key == null) return;
+        var task = await StartupTask.GetAsync(TaskId);
 
         if (enabled)
         {
-            var exePath = Environment.ProcessPath;
-            if (!string.IsNullOrEmpty(exePath))
+            if (IsEffectiveRunning(task.State))
             {
-                // Settings applies this on every save; leave the Run entry alone when it
-                // already points at this executable.
-                var value = $"\"{exePath}\"";
-                if (!string.Equals(key.GetValue(AppName) as string, value, StringComparison.Ordinal))
-                {
-                    key.SetValue(AppName, value);
-                }
+                return true;
             }
+
+            var result = await task.RequestEnableAsync();
+            CrashDiagnostics.Log($"[StartupService] StartupTask '{TaskId}' enable -> {result}");
+            return IsEffectiveRunning(result);
         }
-        else if (key.GetValue(AppName) != null)
+
+        if (!IsEffectiveRunning(task.State))
         {
-            key.DeleteValue(AppName, throwOnMissingValue: false);
+            // Disabled/DisabledByUser/DisabledByPolicy: already off; Windows documents no
+            // behavior for Disable() on the states it owns, so never call it there.
+            return false;
         }
+
+        task.Disable();
+        // Docs make no freshness guarantee for State on the same instance after the
+        // synchronous Disable(); official samples always re-query via GetAsync first.
+        task = await StartupTask.GetAsync(TaskId);
+        CrashDiagnostics.Log($"[StartupService] StartupTask '{TaskId}' disable -> {task.State}");
+        return IsEffectiveRunning(task.State);
+    }
+
+    private static bool IsEffectiveRunning(StartupTaskState state) => state
+        is StartupTaskState.Enabled
+        or StartupTaskState.EnabledByPolicy;
+
+    private static bool ApplyRunKey(bool enabled)
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RegistryPath, true);
+        if (key == null)
+        {
+            CrashDiagnostics.Log("[StartupService] HKCU Run key unavailable");
+            return false;
+        }
+
+        if (!enabled)
+        {
+            key.DeleteValue(ValueName, throwOnMissingValue: false);
+            return false;
+        }
+
+        var exePath = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(exePath))
+        {
+            CrashDiagnostics.Log("[StartupService] Environment.ProcessPath empty; startup entry skipped");
+            return false;
+        }
+
+        // SettingsPage applies this on every save; rewrite only when the path changed.
+        var value = $"\"{exePath}\"";
+        if (!string.Equals(key.GetValue(ValueName) as string, value, StringComparison.Ordinal))
+        {
+            key.SetValue(ValueName, value);
+        }
+        return true;
+    }
+
+    // The Run-key path's answer lives in the registry itself; querying it needs no
+    // package identity, so it is also the safe fallback inside the catch path.
+    internal static bool ReadPendingRunValue()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RegistryPath, writable: false);
+        return !string.IsNullOrEmpty(key?.GetValue(ValueName) as string);
+    }
+
+    // MSIX virtualizes HKCU writes into this package's private hive, so this delete can
+    // never reach the real Run entry a portable install owns; kept as a safety net in
+    // case registry write virtualization is disabled for this package (it is also the
+    // only path that clears values the package's own virtualized hive contains).
+    private static void CleanupLegacyRunKey()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RegistryPath, true);
+        key?.DeleteValue(ValueName, throwOnMissingValue: false);
     }
 }

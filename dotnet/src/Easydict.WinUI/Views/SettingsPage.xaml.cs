@@ -198,6 +198,7 @@ public sealed partial class SettingsPage : Page
     private readonly ModelCatalogCacheService _modelCatalogCache = new();
     private readonly PpOcrV6ModelStore _ppOcrV6ModelStore = new();
     private bool _isLoading = true; // Prevent change detection during initial load
+    private bool _isSaving; // Serializes SaveSettingsAsync: an in-flight save owns every dialog/OS effect
     private bool _isInitialized;
     private bool _isUnloaded;
     private bool _isTornDown;
@@ -4465,9 +4466,28 @@ public sealed partial class SettingsPage : Page
     }
 
     /// <summary>
-    /// Validates and saves all settings. Returns true if save was successful, false if validation failed.
+    /// Serialized entry point: while a save is in flight (it may await on the startup
+    /// task for a while), a re-entrant call (double-clicked Save/Back) exits early and
+    /// returns false — the in-flight save already owns all feedback and OS effects.
     /// </summary>
     private async Task<bool> SaveSettingsAsync()
+    {
+        if (_isSaving) return false;
+        _isSaving = true;
+        try
+        {
+            return await SaveSettingsCoreAsync();
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    /// <summary>
+    /// Validates and saves all settings. Returns true if save was successful, false if validation failed.
+    /// </summary>
+    private async Task<bool> SaveSettingsCoreAsync()
     {
         EnsureAllSettingsTabDataInitialized();
 
@@ -4778,8 +4798,27 @@ public sealed partial class SettingsPage : Page
         _settings.HideEmptyServiceResults = HideEmptyServiceResultsToggle.IsOn;
         _settings.EnableLocalDictionarySuggestions = EnableLocalDictionarySuggestionsToggle.IsOn;
 
-        // Apply startup setting to Windows registry
-        StartupService.SetEnabled(_settings.LaunchAtStartup);
+        // Apply startup setting to Windows (StartupTask on MSIX builds, Run key on portable).
+        // Reconcile when Windows refuses the request (DisabledByUser via Task Manager,
+        // policy, or unwritable Run key) so the toggle never claims a state the OS
+        // will not honor.
+        var requestedStartupSetting = _settings.LaunchAtStartup;
+        var startupEffective = await StartupService.SetEnabledAsync(requestedStartupSetting);
+        if (startupEffective != requestedStartupSetting)
+        {
+            CrashDiagnostics.Log($"[SettingsPage] Startup setting reconciled to {startupEffective}");
+            var wasLoading = _isLoading;
+            _isLoading = true;
+            try
+            {
+                LaunchAtStartupToggle.IsOn = startupEffective;
+                _settings.LaunchAtStartup = startupEffective;
+            }
+            finally
+            {
+                _isLoading = wasLoading;
+            }
+        }
 
         // Save hotkey settings
         _settings.ShowWindowHotkey = ShowHotkeyBox.Text;

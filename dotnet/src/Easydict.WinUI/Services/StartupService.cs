@@ -91,6 +91,9 @@ public static class StartupService
         }
 
         task.Disable();
+        // Docs make no freshness guarantee for State on the same instance after the
+        // synchronous Disable(); official samples always re-query via GetAsync first.
+        task = await StartupTask.GetAsync(TaskId);
         CrashDiagnostics.Log($"[StartupService] StartupTask '{TaskId}' disable -> {task.State}");
         return IsEffectiveRunning(task.State);
     }
@@ -138,8 +141,10 @@ public static class StartupService
         return !string.IsNullOrEmpty(key?.GetValue(ValueName) as string);
     }
 
-    // Portable legacy installs that were upgraded to the MSIX leave an HKCU Run entry
-    // behind; Windows would execute it at logon next to the StartupTask.
+    // MSIX virtualizes HKCU writes into this package's private hive, so this delete can
+    // never reach the real Run entry a portable install owns; kept as a safety net in
+    // case registry write virtualization is disabled for this package (it is also the
+    // only path that clears values the package's own virtualized hive contains).
     private static void CleanupLegacyRunKey()
     {
         using var key = Registry.CurrentUser.OpenSubKey(RegistryPath, true);

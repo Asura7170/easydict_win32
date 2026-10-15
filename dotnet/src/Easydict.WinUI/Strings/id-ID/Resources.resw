@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>Pengaturan Anda telah berhasil disimpan.</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>Pengaturan telah disimpan. Windows tidak mengaktifkan mulai saat startup karena dinonaktifkan di Pengelola Tugas. Aktifkan Easydict di Pengelola Tugas, Aplikasi startup.</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>Pengaturan telah disimpan. Kebijakan Windows membuat mulai saat startup tetap nonaktif.</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>Pengaturan telah disimpan. Kebijakan Windows membuat mulai saat startup tetap aktif, jadi tidak dapat dimatikan.</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>Pengaturan telah disimpan. Entri startup tidak dapat ditulis.</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>Pengaturan telah disimpan. Windows tidak menerapkan perubahan startup.</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>Perlu Dimulai Ulang</value>
   </data>

@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>C&#xE0;i &#x111;&#x1EB7;t c&#x1EE7;a b&#x1EA1;n &#x111;&#xE3; &#x111;&#x1B0;&#x1EE3;c l&#x1B0;u th&#xE0;nh c&#xF4;ng.</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>Đã lưu cài đặt. Windows không bật khởi động cùng hệ thống vì mục này đã bị tắt trong Trình quản lý tác vụ. Hãy bật Easydict trong Trình quản lý tác vụ, Ứng dụng khởi động.</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>Đã lưu cài đặt. Chính sách Windows đang giữ khởi động cùng hệ thống ở trạng thái tắt.</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>Đã lưu cài đặt. Chính sách Windows đang giữ khởi động cùng hệ thống ở trạng thái bật, nên không tắt được.</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>Đã lưu cài đặt. Không ghi được mục khởi động.</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>Đã lưu cài đặt. Windows không áp dụng thay đổi khởi động.</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>C&#x1EA7;n kh&#x1EDF;i &#x111;&#x1ED9;ng l&#x1EA1;i</value>
   </data>

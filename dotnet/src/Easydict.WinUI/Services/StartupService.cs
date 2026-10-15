@@ -4,6 +4,25 @@ using Windows.ApplicationModel;
 namespace Easydict.WinUI.Services;
 
 /// <summary>
+/// Why Windows did not leave startup in the state the settings save requested.
+/// <see cref="None"/> means the effective state matches the request.
+/// </summary>
+public enum StartupRefusal
+{
+    None,
+    DisabledByUser,
+    DisabledByPolicy,
+    EnabledByPolicy,
+    RunKeyUnavailable,
+    Failed,
+}
+
+/// <summary>
+/// Effective logon-start state after a save, plus why it differs from the request.
+/// </summary>
+public readonly record struct StartupApplyResult(bool Effective, StartupRefusal Refusal);
+
+/// <summary>
 /// Applies the "Launch at Windows startup" setting.
 /// Packaged (MSIX) builds use the manifest-declared windows.startupTask; portable
 /// builds fall back to the classic HKCU...\CurrentVersion\Run registry entry.
@@ -18,13 +37,36 @@ public static class StartupService
     internal const string RegistryPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
 
     /// <summary>
+    /// Whether Windows will launch the app at logon. Does not enable, disable, or write settings.
+    /// Null when the packaged task cannot be queried; callers keep the stored value.
+    /// </summary>
+    public static async Task<bool?> ReadEffectiveEnabledAsync()
+    {
+        try
+        {
+            if (!EasydictConditions.IsPackaged)
+            {
+                return ReadPendingRunValue();
+            }
+
+            var task = await StartupTask.GetAsync(TaskId);
+            return IsEffectiveRunning(task.State);
+        }
+        catch (Exception ex)
+        {
+            CrashDiagnostics.Log($"[StartupService] ReadEffectiveEnabledAsync failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Applies the requested startup state and reports the effective one, i.e. whether
     /// Windows will actually launch the app at logon. Use the result to reconcile the
     /// settings and the UI: Windows deliberately refuses DisabledByUser re-enables
-    /// requested from code (Settings &gt; Startup apps / Task Manager owns that state).
-    /// Returns FALSE after a successful disable.
+    /// requested from code (Task Manager owns that state).
+    /// Effective is false after a successful disable.
     /// </summary>
-    public static async Task<bool> SetEnabledAsync(bool enabled)
+    public static async Task<StartupApplyResult> SetEnabledAsync(bool enabled)
     {
         try
         {
@@ -47,27 +89,29 @@ public static class StartupService
         catch (Exception ex)
         {
             CrashDiagnostics.Log($"[StartupService] SetEnabledAsync({enabled}) failed: {ex.Message}");
-            // Report the ACTUAL effective state instead of a silent false: a failed
-            // disable must not be mistaken for a successful one. Unpackaged builds
-            // have no package identity, so they ask the Run key instead.
+            // Report the actual effective state: a failed disable must not look successful.
+            // Unpackaged builds have no package identity, so they ask the Run key instead.
             try
             {
                 if (!EasydictConditions.IsPackaged)
                 {
-                    return ReadPendingRunValue();
+                    return ResultFor(enabled, ReadPendingRunValue(), StartupRefusal.RunKeyUnavailable);
                 }
 
                 var task = await StartupTask.GetAsync(TaskId);
-                return IsEffectiveRunning(task.State);
+                return FromTaskState(enabled, task.State);
             }
             catch
             {
-                return false;
+                // Unknown either way. Do not report a disable as successful.
+                return enabled
+                    ? new StartupApplyResult(false, StartupRefusal.Failed)
+                    : new StartupApplyResult(true, StartupRefusal.Failed);
             }
         }
     }
 
-    private static async Task<bool> ApplyStartupTaskAsync(bool enabled)
+    private static async Task<StartupApplyResult> ApplyStartupTaskAsync(bool enabled)
     {
         var task = await StartupTask.GetAsync(TaskId);
 
@@ -75,19 +119,19 @@ public static class StartupService
         {
             if (IsEffectiveRunning(task.State))
             {
-                return true;
+                return FromTaskState(enabled, task.State);
             }
 
             var result = await task.RequestEnableAsync();
             CrashDiagnostics.Log($"[StartupService] StartupTask '{TaskId}' enable -> {result}");
-            return IsEffectiveRunning(result);
+            return FromTaskState(enabled, result);
         }
 
         if (!IsEffectiveRunning(task.State))
         {
             // Disabled/DisabledByUser/DisabledByPolicy: already off; Windows documents no
             // behavior for Disable() on the states it owns, so never call it there.
-            return false;
+            return FromTaskState(enabled, task.State);
         }
 
         task.Disable();
@@ -95,33 +139,53 @@ public static class StartupService
         // synchronous Disable(); official samples always re-query via GetAsync first.
         task = await StartupTask.GetAsync(TaskId);
         CrashDiagnostics.Log($"[StartupService] StartupTask '{TaskId}' disable -> {task.State}");
-        return IsEffectiveRunning(task.State);
+        return FromTaskState(enabled, task.State);
+    }
+
+    private static StartupApplyResult FromTaskState(bool requested, StartupTaskState state)
+    {
+        var refusal = state switch
+        {
+            StartupTaskState.DisabledByUser => StartupRefusal.DisabledByUser,
+            StartupTaskState.DisabledByPolicy => StartupRefusal.DisabledByPolicy,
+            StartupTaskState.EnabledByPolicy => StartupRefusal.EnabledByPolicy,
+            _ => StartupRefusal.Failed,
+        };
+        return ResultFor(requested, IsEffectiveRunning(state), refusal);
+    }
+
+    private static StartupApplyResult ResultFor(bool requested, bool effective, StartupRefusal refusalWhenMismatch)
+    {
+        return effective == requested
+            ? new StartupApplyResult(effective, StartupRefusal.None)
+            : new StartupApplyResult(effective, refusalWhenMismatch);
     }
 
     private static bool IsEffectiveRunning(StartupTaskState state) => state
         is StartupTaskState.Enabled
         or StartupTaskState.EnabledByPolicy;
 
-    private static bool ApplyRunKey(bool enabled)
+    private static StartupApplyResult ApplyRunKey(bool enabled)
     {
         using var key = Registry.CurrentUser.OpenSubKey(RegistryPath, true);
         if (key == null)
         {
             CrashDiagnostics.Log("[StartupService] HKCU Run key unavailable");
-            return false;
+            // Nothing is registered, so a disable request is already satisfied.
+            return new StartupApplyResult(false, enabled ? StartupRefusal.RunKeyUnavailable : StartupRefusal.None);
         }
 
         if (!enabled)
         {
             key.DeleteValue(ValueName, throwOnMissingValue: false);
-            return false;
+            return new StartupApplyResult(false, StartupRefusal.None);
         }
 
         var exePath = Environment.ProcessPath;
         if (string.IsNullOrEmpty(exePath))
         {
             CrashDiagnostics.Log("[StartupService] Environment.ProcessPath empty; startup entry skipped");
-            return false;
+            return new StartupApplyResult(false, StartupRefusal.RunKeyUnavailable);
         }
 
         // SettingsPage applies this on every save; rewrite only when the path changed.
@@ -130,7 +194,7 @@ public static class StartupService
         {
             key.SetValue(ValueName, value);
         }
-        return true;
+        return new StartupApplyResult(true, StartupRefusal.None);
     }
 
     // The Run-key path's answer lives in the registry itself; querying it needs no

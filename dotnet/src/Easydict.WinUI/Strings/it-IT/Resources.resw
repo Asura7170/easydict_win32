@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>Le impostazioni sono state salvate con successo.</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>Le impostazioni sono state salvate. Windows non ha attivato l'avvio perché è disattivato in Gestione attività. Abilita Easydict in Gestione attività, App di avvio.</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>Le impostazioni sono state salvate. Un criterio di Windows mantiene l'avvio disattivato.</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>Le impostazioni sono state salvate. Un criterio di Windows mantiene l'avvio attivato, quindi non è stato disattivato.</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>Le impostazioni sono state salvate. Non è stato possibile scrivere la voce di avvio.</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>Le impostazioni sono state salvate. Windows non ha applicato la modifica dell'avvio.</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>Riavvio necessario</value>
   </data>

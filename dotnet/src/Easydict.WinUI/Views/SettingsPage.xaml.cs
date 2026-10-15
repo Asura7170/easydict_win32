@@ -199,6 +199,8 @@ public sealed partial class SettingsPage : Page
     private readonly PpOcrV6ModelStore _ppOcrV6ModelStore = new();
     private bool _isLoading = true; // Prevent change detection during initial load
     private bool _isSaving; // Serializes SaveSettingsAsync: an in-flight save owns every dialog/OS effect
+    private bool _launchAtStartupUserEdited;
+    private StartupRefusal _startupRefusal;
     private bool _isInitialized;
     private bool _isUnloaded;
     private bool _isTornDown;
@@ -2815,6 +2817,11 @@ public sealed partial class SettingsPage : Page
     {
         if (_isLoading) return;
 
+        if (ReferenceEquals(sender, LaunchAtStartupToggle))
+        {
+            _launchAtStartupUserEdited = true;
+        }
+
         if (!DoesChangedControlDifferFromSettings(sender, e) && !HasAnyTrackedSettingChanges())
         {
             _hasUnsavedChanges = false;
@@ -2990,7 +2997,7 @@ public sealed partial class SettingsPage : Page
             || MouseSelectionTranslateToggle.IsOn != _settings.MouseSelectionTranslate
             || !SameSequence(GetCommaSeparatedValues(MouseSelectionExcludedAppsBox.Text), _settings.MouseSelectionExcludedApps)
             || AlwaysOnTopToggle.IsOn != _settings.AlwaysOnTop
-            || LaunchAtStartupToggle.IsOn != _settings.LaunchAtStartup
+            || (_launchAtStartupUserEdited && LaunchAtStartupToggle.IsOn != _settings.LaunchAtStartup)
             || !SameDouble(TtsSpeedSlider.Value, _settings.TtsSpeed)
             || !SameSetting(_pendingTtsVoiceId, _settings.SelectedTtsVoiceId)
             || AutoPlayTranslationToggle.IsOn != _settings.AutoPlayTranslation
@@ -3334,6 +3341,7 @@ public sealed partial class SettingsPage : Page
             ShowSourcePlayButtonToggle.IsOn = _settings.ShowSourcePlayButton;
             ShowSwapButtonToggle.IsOn = _settings.ShowSwapButton;
             LaunchAtStartupToggle.IsOn = _settings.LaunchAtStartup;
+            _ = SyncLaunchAtStartupToggleFromSystemAsync();
             HideEmptyServiceResultsToggle.IsOn = _settings.HideEmptyServiceResults;
             EnableLocalDictionarySuggestionsToggle.IsOn = _settings.EnableLocalDictionarySuggestions;
             var localDictionarySuggestionsState = GetLocalDictionarySuggestionsToggleState(_settings.ImportedMdxDictionaries.Count);
@@ -4377,6 +4385,11 @@ public sealed partial class SettingsPage : Page
                     HideNavigationLoadingOverlay();
                     return; // Validation failed, stay on page
                 }
+
+                if (_startupRefusal != StartupRefusal.None)
+                {
+                    await ShowSaveResultDialogAsync();
+                }
             }
             else if (result == ContentDialogResult.Secondary)
             {
@@ -4467,21 +4480,82 @@ public sealed partial class SettingsPage : Page
         MainScrollViewer.IsEnabled = true;
     }
 
+    private async Task SyncLaunchAtStartupToggleFromSystemAsync()
+    {
+        try
+        {
+            ApplyLaunchAtStartupRead(await App.LaunchAtStartupRead, duringSave: false);
+        }
+        catch (Exception ex)
+        {
+            CrashDiagnostics.Log($"[SettingsPage] LaunchAtStartup read failed: {ex.Message}");
+        }
+    }
+
+    // Show the system state on the toggle without writing settings.json. A settings
+    // save copies the toggle into LaunchAtStartup and persists it.
+    private void ApplyLaunchAtStartupRead(bool? effective, bool duringSave)
+    {
+        if (effective is not bool value || _launchAtStartupUserEdited || _isUnloaded)
+        {
+            return;
+        }
+
+        if (!duringSave && _isSaving)
+        {
+            return;
+        }
+
+        if (!IsSettingsTabInitialized(SettingsTabId.General) || LaunchAtStartupToggle.IsOn == value)
+        {
+            return;
+        }
+
+        var wasLoading = _isLoading;
+        _isLoading = true;
+        try
+        {
+            LaunchAtStartupToggle.IsOn = value;
+        }
+        finally
+        {
+            _isLoading = wasLoading;
+        }
+    }
+
+    private async Task ShowSaveResultDialogAsync()
+    {
+        var loc = LocalizationService.Instance;
+        var dialog = new ContentDialog
+        {
+            Title = loc.GetString("SettingsSaved"),
+            Content = StartupRefusalMessage() ?? loc.GetString("SettingsSavedMessage"),
+            CloseButtonText = loc.GetString("OK"),
+            XamlRoot = this.XamlRoot
+        };
+        await ShowDialogAsync(dialog);
+    }
+
+    private string? StartupRefusalMessage()
+    {
+        var key = _startupRefusal switch
+        {
+            StartupRefusal.DisabledByUser => "StartupRefusedByUser",
+            StartupRefusal.DisabledByPolicy => "StartupRefusedByPolicy",
+            StartupRefusal.EnabledByPolicy => "StartupKeptByPolicy",
+            StartupRefusal.RunKeyUnavailable => "StartupRunKeyUnavailable",
+            StartupRefusal.Failed => "StartupRefusedGeneric",
+            _ => null,
+        };
+        return key is null ? null : LocalizationService.Instance.GetString(key);
+    }
+
     private async void OnSaveClick(object sender, RoutedEventArgs e)
     {
         var saved = await SaveSettingsAsync();
         if (!saved) return;
 
-        // Show confirmation
-        var loc = LocalizationService.Instance;
-        var dialog = new ContentDialog
-        {
-            Title = loc.GetString("SettingsSaved"),
-            Content = loc.GetString("SettingsSavedMessage"),
-            CloseButtonText = loc.GetString("OK"),
-            XamlRoot = this.XamlRoot
-        };
-        await ShowDialogAsync(dialog);
+        await ShowSaveResultDialogAsync();
     }
 
     /// <summary>
@@ -4508,6 +4582,7 @@ public sealed partial class SettingsPage : Page
     /// </summary>
     private async Task<bool> SaveSettingsCoreAsync()
     {
+        _startupRefusal = StartupRefusal.None;
         EnsureAllSettingsTabDataInitialized();
 
         // Get localization service instance once for the entire method
@@ -4811,6 +4886,22 @@ public sealed partial class SettingsPage : Page
         _settings.ShowPinButton = ShowPinButtonToggle.IsOn;
         _settings.ShowSourcePlayButton = ShowSourcePlayButtonToggle.IsOn;
         _settings.ShowSwapButton = ShowSwapButtonToggle.IsOn;
+        if (!_launchAtStartupUserEdited)
+        {
+            try
+            {
+                var read = await App.LaunchAtStartupRead;
+                if (!_launchAtStartupUserEdited)
+                {
+                    ApplyLaunchAtStartupRead(read, duringSave: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                CrashDiagnostics.Log($"[SettingsPage] LaunchAtStartup read failed: {ex.Message}");
+            }
+        }
+
         _settings.LaunchAtStartup = LaunchAtStartupToggle.IsOn;
         _settings.TtsSpeed = TtsSpeedSlider.Value;
         _settings.SelectedTtsVoiceId = _pendingTtsVoiceId;
@@ -4823,16 +4914,17 @@ public sealed partial class SettingsPage : Page
         // policy, or unwritable Run key) so the toggle never claims a state the OS
         // will not honor.
         var requestedStartupSetting = _settings.LaunchAtStartup;
-        var startupEffective = await StartupService.SetEnabledAsync(requestedStartupSetting);
-        if (startupEffective != requestedStartupSetting)
+        var startupResult = await StartupService.SetEnabledAsync(requestedStartupSetting);
+        _startupRefusal = startupResult.Refusal;
+        if (startupResult.Effective != requestedStartupSetting)
         {
-            CrashDiagnostics.Log($"[SettingsPage] Startup setting reconciled to {startupEffective}");
+            CrashDiagnostics.Log($"[SettingsPage] Startup setting reconciled to {startupResult.Effective} ({startupResult.Refusal})");
             var wasLoading = _isLoading;
             _isLoading = true;
             try
             {
-                LaunchAtStartupToggle.IsOn = startupEffective;
-                _settings.LaunchAtStartup = startupEffective;
+                LaunchAtStartupToggle.IsOn = startupResult.Effective;
+                _settings.LaunchAtStartup = startupResult.Effective;
             }
             finally
             {

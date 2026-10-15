@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>설정이 성공적으로 저장되었습니다.</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>설정이 저장되었습니다. 작업 관리자에서 시작 프로그램이 꺼져 있어 Windows가 시작 시 실행을 켜지 못했습니다. 작업 관리자의 시작 앱에서 Easydict를 켜 주세요.</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>설정이 저장되었습니다. Windows 정책이 시작 시 실행을 끈 상태로 유지합니다.</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>설정이 저장되었습니다. Windows 정책이 시작 시 실행을 켠 상태로 유지하여 끄지 못했습니다.</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>설정이 저장되었습니다. 시작 프로그램 항목을 쓰지 못했습니다.</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>설정이 저장되었습니다. Windows가 시작 시 실행 변경을 적용하지 않았습니다.</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>재시작 필요</value>
   </data>

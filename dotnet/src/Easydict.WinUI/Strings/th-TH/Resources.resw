@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>&#xE01;&#xE32;&#xE23;&#xE15;&#xE31;&#xE49;&#xE07;&#xE04;&#xE48;&#xE32;&#xE02;&#xE2D;&#xE07;&#xE04;&#xE38;&#xE13;&#xE44;&#xE14;&#xE49;&#xE23;&#xE31;&#xE1A;&#xE01;&#xE32;&#xE23;&#xE1A;&#xE31;&#xE19;&#xE17;&#xE36;&#xE01;&#xE40;&#xE23;&#xE35;&#xE22;&#xE1A;&#xE23;&#xE49;&#xE2D;&#xE22;&#xE41;&#xE25;&#xE49;&#xE27;</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>บันทึกการตั้งค่าแล้ว Windows ไม่ได้เปิดการเริ่มต้นพร้อมระบบ เพราะถูกปิดในตัวจัดการงาน เปิด Easydict ที่ตัวจัดการงาน แอปเริ่มต้น</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>บันทึกการตั้งค่าแล้ว นโยบาย Windows คงการเริ่มต้นพร้อมระบบไว้เป็นปิด</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>บันทึกการตั้งค่าแล้ว นโยบาย Windows คงการเริ่มต้นพร้อมระบบไว้เป็นเปิด จึงปิดไม่ได้</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>บันทึกการตั้งค่าแล้ว เขียนรายการเริ่มต้นไม่สำเร็จ</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>บันทึกการตั้งค่าแล้ว Windows ไม่ได้ใช้การเปลี่ยนแปลงการเริ่มต้น</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>&#xE15;&#xE49;&#xE2D;&#xE07;&#xE23;&#xE35;&#xE2A;&#xE15;&#xE32;&#xE23;&#xE4C;&#xE17;</value>
   </data>

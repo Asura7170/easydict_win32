@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>Tetapan anda telah berjaya disimpan.</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>Tetapan telah disimpan. Windows tidak menghidupkan permulaan kerana ia dimatikan dalam Pengurus Tugas. Hidupkan Easydict di Pengurus Tugas, Aplikasi permulaan.</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>Tetapan telah disimpan. Dasar Windows mengekalkan permulaan sebagai dimatikan.</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>Tetapan telah disimpan. Dasar Windows mengekalkan permulaan sebagai dihidupkan, jadi ia tidak dimatikan.</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>Tetapan telah disimpan. Entri permulaan tidak dapat ditulis.</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>Tetapan telah disimpan. Windows tidak menggunakan perubahan permulaan.</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>Perlu Dimulakan Semula</value>
   </data>

@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>Your settings have been saved successfully.</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>Your settings were saved. Windows did not turn on startup because it was disabled in Task Manager. Enable Easydict under Task Manager, Startup apps.</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>Your settings were saved. Windows policy is keeping startup turned off.</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>Your settings were saved. Windows policy keeps startup turned on, so it was not turned off.</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>Your settings were saved. The startup entry could not be written.</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>Your settings were saved. Windows did not apply the startup change.</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>Restart Required</value>
   </data>

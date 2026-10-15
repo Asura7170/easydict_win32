@@ -588,6 +588,21 @@
   <data name="SettingsSavedMessage" xml:space="preserve">
     <value>Dine indstillinger er blevet gemt.</value>
   </data>
+  <data name="StartupRefusedByUser" xml:space="preserve">
+    <value>Indstillingerne blev gemt. Windows tændte ikke for start, fordi den er slået fra i Jobliste. Slå Easydict til under Jobliste, Startapps.</value>
+  </data>
+  <data name="StartupRefusedByPolicy" xml:space="preserve">
+    <value>Indstillingerne blev gemt. En Windows-politik holder start slået fra.</value>
+  </data>
+  <data name="StartupKeptByPolicy" xml:space="preserve">
+    <value>Indstillingerne blev gemt. En Windows-politik holder start slået til, så den blev ikke slået fra.</value>
+  </data>
+  <data name="StartupRunKeyUnavailable" xml:space="preserve">
+    <value>Indstillingerne blev gemt. Startposten kunne ikke skrives.</value>
+  </data>
+  <data name="StartupRefusedGeneric" xml:space="preserve">
+    <value>Indstillingerne blev gemt. Windows anvendte ikke ændringen af start.</value>
+  </data>
   <data name="RestartRequired" xml:space="preserve">
     <value>Genstart påkrævet</value>
   </data>

@@ -39,19 +39,20 @@ public sealed class StartupServiceTests : IDisposable
     {
         var expected = $"\"{Environment.ProcessPath}\"";
 
-        var effective = await StartupService.SetEnabledAsync(true);
+        var result = await StartupService.SetEnabledAsync(true);
 
-        effective.Should().BeTrue();
+        result.Effective.Should().BeTrue();
+        result.Refusal.Should().Be(StartupRefusal.None);
         ReadValue().Should().Be(expected);
     }
 
     [Fact]
     public async Task Enable_Twice_KeepsValueUnchanged()
     {
-        (await StartupService.SetEnabledAsync(true)).Should().BeTrue();
+        (await StartupService.SetEnabledAsync(true)).Effective.Should().BeTrue();
         var valueAfterFirst = ReadValue();
 
-        (await StartupService.SetEnabledAsync(true)).Should().BeTrue();
+        (await StartupService.SetEnabledAsync(true)).Effective.Should().BeTrue();
 
         ReadValue().Should().Be(valueAfterFirst);
     }
@@ -59,10 +60,10 @@ public sealed class StartupServiceTests : IDisposable
     [Fact]
     public async Task Disable_AfterEnabled_ReportsNotRunning_AndRemovesValue()
     {
-        (await StartupService.SetEnabledAsync(true)).Should().BeTrue();
+        (await StartupService.SetEnabledAsync(true)).Effective.Should().BeTrue();
         ReadValue().Should().NotBeNull();
 
-        (await StartupService.SetEnabledAsync(false)).Should().BeFalse();
+        (await StartupService.SetEnabledAsync(false)).Effective.Should().BeFalse();
 
         ReadValue().Should().BeNull();
     }
@@ -72,9 +73,20 @@ public sealed class StartupServiceTests : IDisposable
     {
         ReadValue().Should().BeNull();
 
-        var effective = await StartupService.SetEnabledAsync(false);
+        var result = await StartupService.SetEnabledAsync(false);
 
-        effective.Should().BeFalse();
+        result.Effective.Should().BeFalse();
+        result.Refusal.Should().Be(StartupRefusal.None);
+    }
+
+    [Fact]
+    public async Task ReadEffectiveEnabled_MatchesRunValue()
+    {
+        (await StartupService.SetEnabledAsync(false)).Effective.Should().BeFalse();
+        (await StartupService.ReadEffectiveEnabledAsync()).Should().BeFalse();
+
+        (await StartupService.SetEnabledAsync(true)).Effective.Should().BeTrue();
+        (await StartupService.ReadEffectiveEnabledAsync()).Should().BeTrue();
     }
 
     [Fact]

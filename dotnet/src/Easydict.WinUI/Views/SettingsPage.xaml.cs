@@ -881,6 +881,8 @@ public sealed partial class SettingsPage : Page
     private void OnActualThemeChanged(FrameworkElement sender, object args)
     {
         UpdateServiceConfigurationHeaderIconSources();
+        if (!_isUnloaded && !_isTornDown)
+            UpdateTrayIconOptions();
         QueueApplyThemeChrome();
     }
 
@@ -1748,6 +1750,15 @@ public sealed partial class SettingsPage : Page
         AutomationProperties.SetName(EnableLocalDictionarySuggestionsToggle, loc.GetString("EnableLocalDictionarySuggestions"));
         LabsHeaderText.Text = loc.GetString("SettingsTab_Labs");
         LabsDescriptionText.Text = loc.GetString("SettingsTab_Labs_Tooltip");
+        var trayIconLabel = loc.GetString("TrayIcon");
+        TrayIconLabelText.Text = trayIconLabel;
+        AutomationProperties.SetName(TrayIconOptions, trayIconLabel);
+        TrayIconDescriptionText.Text = loc.GetString("TrayIconDescription");
+        SetTrayIconOptionLabel(TrayIconDefaultOption, TrayIconDefaultCaption, loc.GetString("TrayIconDefault"));
+        SetTrayIconOptionLabel(TrayIconEOption, TrayIconECaption, loc.GetString("TrayIconE"));
+        SetTrayIconOptionLabel(TrayIconAjpOption, TrayIconAjpCaption, loc.GetString("TrayIconAjp"));
+        SetTrayIconOptionLabel(TrayIconWenOption, TrayIconWenCaption, loc.GetString("TrayIconWen"));
+        UpdateTrayIconOptions();
         MouseSelectionPopDelayLabel.Text = loc.GetString("MouseSelectionPopDelay");
         MouseSelectionPopDelayDescriptionText.Text = loc.GetString("MouseSelectionPopDelayDescription");
     }
@@ -2831,6 +2842,11 @@ public sealed partial class SettingsPage : Page
             return !SameSetting(GetSelectedTag(AppThemeCombo) ?? "System", _settings.AppTheme);
         }
 
+        if (sender is RadioButton { GroupName: "TrayIcon" })
+        {
+            return !SameSetting(SelectedTrayIconId, TrayIconCatalog.Normalize(_settings.TrayIconId));
+        }
+
         if (ReferenceEquals(sender, HoverWordLookupModifierCombo))
         {
             return !SameSetting(GetTagComboValue(HoverWordLookupModifierCombo, "Ctrl"), _settings.HoverWordLookupModifier);
@@ -2990,7 +3006,8 @@ public sealed partial class SettingsPage : Page
 
     private bool LabsTabSettingsDifferFromSettings()
     {
-        return HoverWordLookupToggle.IsOn != _settings.HoverWordLookupEnabled
+        return !SameSetting(SelectedTrayIconId, TrayIconCatalog.Normalize(_settings.TrayIconId))
+            || HoverWordLookupToggle.IsOn != _settings.HoverWordLookupEnabled
             || !SameSetting(GetTagComboValue(HoverWordLookupModifierCombo, "Ctrl"), _settings.HoverWordLookupModifier)
             || HoverWordLookupOcrFallbackToggle.IsOn != _settings.HoverWordLookupUseOcrFallback
             || (int)Math.Round(HoverWordLookupDelaySlider.Value) != _settings.HoverWordLookupDelayMs
@@ -3328,6 +3345,8 @@ public sealed partial class SettingsPage : Page
 
         if (ShouldLoadSettingsTab(SettingsTabId.Labs, deferLazyTabData))
         {
+            SelectTrayIconOption(_settings.TrayIconId);
+            UpdateTrayIconOptions();
             HoverWordLookupToggle.IsOn = _settings.HoverWordLookupEnabled;
             SetTagComboValue(HoverWordLookupModifierCombo, _settings.HoverWordLookupModifier, "Ctrl");
             HoverWordLookupOcrFallbackToggle.IsOn = _settings.HoverWordLookupUseOcrFallback;
@@ -4758,6 +4777,7 @@ public sealed partial class SettingsPage : Page
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(s => s.Length > 0)
             .ToList();
+        _settings.TrayIconId = SelectedTrayIconId;
         _settings.HoverWordLookupEnabled = HoverWordLookupToggle.IsOn;
         _settings.HoverWordLookupModifier = GetTagComboValue(HoverWordLookupModifierCombo, "Ctrl");
         _settings.HoverWordLookupUseOcrFallback = HoverWordLookupOcrFallbackToggle.IsOn;
@@ -4863,6 +4883,7 @@ public sealed partial class SettingsPage : Page
 
         // Apply clipboard monitoring immediately
         App.ApplyClipboardMonitoring(_settings.ClipboardMonitoring);
+        App.ApplyTrayIcon();
         App.ApplyMouseSelectionTranslate(_settings.MouseSelectionTranslate);
         App.ApplyHoverWordLookup();
 
@@ -5456,6 +5477,187 @@ public sealed partial class SettingsPage : Page
             if (currentIndex != i)
                 collection.Move(currentIndex, i);
         }
+    }
+
+    private bool _trayIconPreviewFailureHooked;
+
+    private string SelectedTrayIconId =>
+        TrayIconEOption.IsChecked == true ? TrayIconCatalog.EId :
+        TrayIconAjpOption.IsChecked == true ? TrayIconCatalog.AjpId :
+        TrayIconWenOption.IsChecked == true ? TrayIconCatalog.WenId :
+        TrayIconCatalog.DefaultId;
+
+    private static void SetTrayIconOptionLabel(RadioButton option, TextBlock caption, string label)
+    {
+        caption.Text = label;
+        AutomationProperties.SetName(option, label);
+        ToolTipService.SetToolTip(option, label);
+    }
+
+    private void SelectTrayIconOption(string? id)
+    {
+        var option = TrayIconCatalog.Normalize(id) switch
+        {
+            TrayIconCatalog.EId => TrayIconEOption,
+            TrayIconCatalog.AjpId => TrayIconAjpOption,
+            TrayIconCatalog.WenId => TrayIconWenOption,
+            _ => TrayIconDefaultOption
+        };
+        option.IsChecked = true;
+    }
+
+    private void OnTrayIconOptionChecked(object sender, RoutedEventArgs e)
+    {
+        UpdateTrayIconOptions();
+        OnSettingChanged(sender, e);
+    }
+
+    private int _appliedTrayIconOptionColumns;
+    private double _appliedTrayIconOptionWidth = double.NaN;
+    private bool _applyingTrayIconOptionLayout;
+
+    private void OnTrayIconOptionsSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_isUnloaded || _isTornDown || _applyingTrayIconOptionLayout)
+            return;
+
+        ApplyTrayIconOptionLayout(e.NewSize.Width);
+    }
+
+    private void ApplyTrayIconOptionLayout(double width)
+    {
+        if (width < 32)
+            return;
+
+        var layout = TrayIconOptionLayout.Compute(width);
+        if (_appliedTrayIconOptionColumns == layout.Columns
+            && Math.Abs(_appliedTrayIconOptionWidth - width) < 0.5)
+            return;
+
+        _applyingTrayIconOptionLayout = true;
+        try
+        {
+            // Place into the surviving columns before dropping the extras, or Grid.SetColumn throws.
+            if (layout.Columns < TrayIconOptions.ColumnDefinitions.Count)
+                PlaceTrayIconOptions(layout.Columns);
+            EnsureTrayIconColumnCount(layout.Columns);
+            PlaceTrayIconOptions(layout.Columns);
+            TrayIconOptions.RowSpacing = layout.Columns == 4 ? 0 : TrayIconOptionLayout.ColumnGap;
+
+            SetTrayIconTileSize(TrayIconDefaultImage, layout.ImageSize);
+            SetTrayIconTileSize(TrayIconEImage, layout.ImageSize);
+            SetTrayIconTileSize(TrayIconAjpImage, layout.ImageSize);
+            SetTrayIconTileSize(TrayIconWenImage, layout.ImageSize);
+
+            _appliedTrayIconOptionColumns = layout.Columns;
+            _appliedTrayIconOptionWidth = width;
+        }
+        finally
+        {
+            _applyingTrayIconOptionLayout = false;
+        }
+
+        var actual = TrayIconOptions.ActualWidth;
+        if (actual >= 32 && Math.Abs(actual - width) >= 0.5)
+            ApplyTrayIconOptionLayout(actual);
+    }
+
+    private void EnsureTrayIconColumnCount(int columns)
+    {
+        var definitions = TrayIconOptions.ColumnDefinitions;
+        while (definitions.Count > columns)
+            definitions.RemoveAt(definitions.Count - 1);
+        while (definitions.Count < columns)
+            definitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+    }
+
+    private void PlaceTrayIconOptions(int columns)
+    {
+        if (columns >= 4)
+        {
+            PlaceTrayIconOption(TrayIconDefaultOption, 0, 0);
+            PlaceTrayIconOption(TrayIconEOption, 1, 0);
+            PlaceTrayIconOption(TrayIconAjpOption, 2, 0);
+            PlaceTrayIconOption(TrayIconWenOption, 3, 0);
+            return;
+        }
+
+        PlaceTrayIconOption(TrayIconDefaultOption, 0, 0);
+        PlaceTrayIconOption(TrayIconEOption, 1, 0);
+        PlaceTrayIconOption(TrayIconAjpOption, 0, 1);
+        PlaceTrayIconOption(TrayIconWenOption, 1, 1);
+    }
+
+    private static void PlaceTrayIconOption(RadioButton option, int column, int row)
+    {
+        Grid.SetColumn(option, column);
+        Grid.SetRow(option, row);
+    }
+
+    private static void SetTrayIconTileSize(Image image, double size)
+    {
+        if (Math.Abs(image.Width - size) < 0.5 && Math.Abs(image.Height - size) < 0.5)
+            return;
+
+        image.Width = size;
+        image.Height = size;
+    }
+
+    private void UpdateTrayIconOptions()
+    {
+        if (_isUnloaded || _isTornDown)
+            return;
+
+        if (!_trayIconPreviewFailureHooked)
+        {
+            _trayIconPreviewFailureHooked = true;
+            HookTrayIconImageFailure(TrayIconDefaultImage, TrayIconDefaultFallback);
+            HookTrayIconImageFailure(TrayIconEImage, TrayIconEFallback);
+            HookTrayIconImageFailure(TrayIconAjpImage, TrayIconAjpFallback);
+            HookTrayIconImageFailure(TrayIconWenImage, TrayIconWenFallback);
+        }
+
+        var dark = ThemedIconService.IsTaskbarDark;
+        ShowTrayIconPreview(TrayIconDefaultImage, TrayIconDefaultFallback, TrayIconCatalog.DefaultId, dark);
+        ShowTrayIconPreview(TrayIconEImage, TrayIconEFallback, TrayIconCatalog.EId, dark);
+        ShowTrayIconPreview(TrayIconAjpImage, TrayIconAjpFallback, TrayIconCatalog.AjpId, dark);
+        ShowTrayIconPreview(TrayIconWenImage, TrayIconWenFallback, TrayIconCatalog.WenId, dark);
+
+        var id = SelectedTrayIconId;
+        var missing = id != TrayIconCatalog.DefaultId && !TrayIconCatalog.HasBundledIcon(id, dark);
+        TrayIconMissingText.Visibility = missing ? Visibility.Visible : Visibility.Collapsed;
+        if (missing)
+        {
+            TrayIconMissingText.Text = LocalizationService.Instance.GetString("TrayIconPlaceholderMissing")
+                + " " + TrayIconCatalog.ExpectedFileHint(id);
+        }
+    }
+
+    private static void HookTrayIconImageFailure(Image image, TextBlock fallback)
+    {
+        image.ImageFailed += (_, _) =>
+        {
+            image.Visibility = Visibility.Collapsed;
+            fallback.Visibility = Visibility.Visible;
+        };
+    }
+
+    private static void ShowTrayIconPreview(Image image, TextBlock fallback, string id, bool dark)
+    {
+        var previewPath = TrayIconCatalog.TryGetPreviewPath(id, dark);
+        if (previewPath is null)
+        {
+            image.Source = null;
+            image.Visibility = Visibility.Collapsed;
+            fallback.Visibility = Visibility.Visible;
+            return;
+        }
+
+        fallback.Visibility = Visibility.Collapsed;
+        image.Visibility = Visibility.Visible;
+        var bitmap = new BitmapImage();
+        bitmap.UriSource = new Uri(previewPath);
+        image.Source = bitmap;
     }
 
     /// <summary>

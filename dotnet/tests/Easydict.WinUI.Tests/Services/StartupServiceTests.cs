@@ -12,6 +12,9 @@ namespace Easydict.WinUI.Tests.Services;
 /// install checklist instead. Every test runs under a dedicated value name so the
 /// machine's real "Easydict" Run entry (created by the app or the Inno installer)
 /// is never touched.
+/// The Run subkey may not exist on fresh CI runner profiles (the same test code
+/// passed 6/6 on one run and failed on another when the subkey was absent), so
+/// every writable open uses the idempotent CreateSubKey instead of OpenSubKey.
 /// </summary>
 [Trait("Category", "WinUI")]
 public sealed class StartupServiceTests : IDisposable
@@ -78,7 +81,7 @@ public sealed class StartupServiceTests : IDisposable
     public async Task Enable_WithStalePathValue_RewritesToCurrentExe()
     {
         // Migration case: the Run value points at an old portable install.
-        using (var key = Registry.CurrentUser.OpenSubKey(StartupService.RegistryPath, true))
+        using (var key = Registry.CurrentUser.CreateSubKey(StartupService.RegistryPath, writable: true))
         {
             key.Should().NotBeNull();
             key?.SetValue(TestValueName, "\"C:\\old\\Easydict.exe\"");
@@ -94,7 +97,7 @@ public sealed class StartupServiceTests : IDisposable
     {
         StartupService.ReadPendingRunValue().Should().BeFalse();
 
-        using (var key = Registry.CurrentUser.OpenSubKey(StartupService.RegistryPath, true))
+        using (var key = Registry.CurrentUser.CreateSubKey(StartupService.RegistryPath, writable: true))
         {
             key.Should().NotBeNull();
             key?.SetValue(StartupService.ValueName, "\"C:\\anything.exe\"");
@@ -111,7 +114,7 @@ public sealed class StartupServiceTests : IDisposable
 
     private static void DisposeValue()
     {
-        using var key = Registry.CurrentUser.OpenSubKey(StartupService.RegistryPath, true);
+        using var key = Registry.CurrentUser.CreateSubKey(StartupService.RegistryPath, writable: true);
         key?.DeleteValue(TestValueName, throwOnMissingValue: false);
     }
 }

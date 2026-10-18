@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using Easydict.TranslationService.Models;
 using Easydict.TranslationService.Services;
 using Easydict.TranslationService.Tests.Mocks;
@@ -581,5 +582,179 @@ public class GoogleTranslateServiceTests
 
         result.DetectedLanguage.Should().Be(Language.Spanish);
         result.TranslatedText.Should().Be("Hola");
+    }
+
+    [Fact]
+    public async Task TranslateAsync_FallbackEscapesHtmlAndPreservesLineBreaks()
+    {
+        // translateHtml parses its input as HTML, so markup characters must be escaped
+        // and line breaks sent as <br> (raw newlines are collapsed by the endpoint)
+        _mockHandler.EnqueueErrorResponse(HttpStatusCode.TooManyRequests);
+        _mockHandler.EnqueueJsonResponse("""[["si a &lt; b &amp;&amp; c &gt; d<br>AT&amp;T gana"]]""");
+
+        var request = new TranslationRequest
+        {
+            Text = "if a < b && c > d\nAT&T wins",
+            FromLanguage = Language.English,
+            ToLanguage = Language.Spanish
+        };
+
+        var result = await _service.TranslateAsync(request);
+
+        using var body = JsonDocument.Parse(_mockHandler.LastRequestBody!);
+        body.RootElement[0][0][0].GetString()
+            .Should().Be("if a &lt; b &amp;&amp; c &gt; d<br>AT&amp;T wins");
+        result.TranslatedText.Should().Be("si a < b && c > d\nAT&T gana");
+    }
+
+    [Theory]
+    [InlineData("a < b", "a &lt; b")]
+    [InlineData("AT&T", "AT&amp;T")]
+    [InlineData("<br>", "&lt;br&gt;")]
+    [InlineData("line1\nline2", "line1<br>line2")]
+    [InlineData("line1\r\nline2\rline3", "line1<br>line2<br>line3")]
+    public void EncodeForTranslateHtml_EscapesMarkupAndLineBreaks(string input, string expected)
+    {
+        GoogleTranslateService.EncodeForTranslateHtml(input).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("a &lt; b", "a < b")]
+    [InlineData("one<br>two<br/>three<BR />four", "one\ntwo\nthree\nfour")]
+    [InlineData("&lt;br&gt;", "<br>")]
+    [InlineData("it&#39;s &quot;ok&quot;", "it's \"ok\"")]
+    public void DecodeFromTranslateHtml_RestoresTextAndLineBreaks(string input, string expected)
+    {
+        GoogleTranslateService.DecodeFromTranslateHtml(input).Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_AfterGtx429_SkipsGtxDuringCooldown()
+    {
+        var time = new MutableTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+        var service = new GoogleTranslateService(_httpClient, time);
+
+        _mockHandler.EnqueueErrorResponse(HttpStatusCode.TooManyRequests);
+        _mockHandler.EnqueueJsonResponse("""[["Hola"]]""");
+        _mockHandler.EnqueueJsonResponse("""[["Adiós"]]""");
+
+        await service.TranslateAsync(CreateEnToEsRequest("Hello"));
+        time.Advance(TimeSpan.FromSeconds(30));
+        var second = await service.TranslateAsync(CreateEnToEsRequest("Goodbye"));
+
+        // The second query goes straight to the web endpoint: one request, not two
+        second.TranslatedText.Should().Be("Adiós");
+        var requests = _mockHandler.Requests;
+        requests.Should().HaveCount(3);
+        requests[2].Method.Should().Be(HttpMethod.Post);
+        requests[2].RequestUri!.Host.Should().Be("translate-pa.googleapis.com");
+    }
+
+    [Fact]
+    public async Task TranslateAsync_AfterCooldownExpires_UsesGtxAgain()
+    {
+        var time = new MutableTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+        var service = new GoogleTranslateService(_httpClient, time);
+
+        _mockHandler.EnqueueErrorResponse(HttpStatusCode.TooManyRequests);
+        _mockHandler.EnqueueJsonResponse("""[["Hola"]]""");
+        _mockHandler.EnqueueJsonResponse("""{"sentences": [{"trans": "Adiós"}], "src": "en"}""");
+
+        await service.TranslateAsync(CreateEnToEsRequest("Hello"));
+        time.Advance(GoogleTranslateService.DefaultGtxCooldown + TimeSpan.FromSeconds(1));
+        var second = await service.TranslateAsync(CreateEnToEsRequest("Goodbye"));
+
+        second.TranslatedText.Should().Be("Adiós");
+        var requests = _mockHandler.Requests;
+        requests.Should().HaveCount(3);
+        requests[2].Method.Should().Be(HttpMethod.Get);
+        requests[2].RequestUri!.Host.Should().Be("translate.googleapis.com");
+    }
+
+    [Fact]
+    public async Task TranslateAsync_HonoursRetryAfterForCooldown()
+    {
+        var time = new MutableTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+        var service = new GoogleTranslateService(_httpClient, time);
+
+        var throttled = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+        throttled.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(120));
+        _mockHandler.EnqueueResponse(throttled);
+        _mockHandler.EnqueueJsonResponse("""[["Hola"]]""");
+        _mockHandler.EnqueueJsonResponse("""[["Hola"]]""");
+        _mockHandler.EnqueueJsonResponse("""{"sentences": [{"trans": "Hola"}], "src": "en"}""");
+
+        await service.TranslateAsync(CreateEnToEsRequest("Hello"));
+
+        // Past the 60s default but inside Retry-After: still skipping gtx
+        time.Advance(TimeSpan.FromSeconds(90));
+        await service.TranslateAsync(CreateEnToEsRequest("Hello"));
+        _mockHandler.LastRequest!.Method.Should().Be(HttpMethod.Post);
+
+        time.Advance(TimeSpan.FromSeconds(31));
+        await service.TranslateAsync(CreateEnToEsRequest("Hello"));
+        _mockHandler.LastRequest!.Method.Should().Be(HttpMethod.Get);
+        _mockHandler.Requests.Should().HaveCount(4);
+    }
+
+    [Fact]
+    public async Task TranslateAsync_DuringCooldownAndFallbackFails_ThrowsRateLimitedWithoutGtx()
+    {
+        var time = new MutableTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+        var service = new GoogleTranslateService(_httpClient, time);
+
+        _mockHandler.EnqueueErrorResponse(HttpStatusCode.TooManyRequests);
+        _mockHandler.EnqueueErrorResponse(HttpStatusCode.TooManyRequests);
+        _mockHandler.EnqueueErrorResponse(HttpStatusCode.TooManyRequests);
+
+        await Assert.ThrowsAsync<TranslationException>(
+            () => service.TranslateAsync(CreateEnToEsRequest("Hello")));
+        var exception = await Assert.ThrowsAsync<TranslationException>(
+            () => service.TranslateAsync(CreateEnToEsRequest("Hello")));
+
+        exception.ErrorCode.Should().Be(TranslationErrorCode.RateLimited);
+        var requests = _mockHandler.Requests;
+        requests.Should().HaveCount(3);
+        requests[2].Method.Should().Be(HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task DetectLanguageAsync_OnGtx429_UsesWebEndpointDetection()
+    {
+        _mockHandler.EnqueueErrorResponse(HttpStatusCode.TooManyRequests);
+        _mockHandler.EnqueueJsonResponse("""[["Hello"],["fr"]]""");
+
+        var detected = await _service.DetectLanguageAsync("Bonjour");
+
+        detected.Should().Be(Language.French);
+        _mockHandler.LastRequest!.Method.Should().Be(HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task DetectLanguageAsync_OnGtxAndWebEndpoint429_ThrowsTooManyRequests()
+    {
+        _mockHandler.EnqueueErrorResponse(HttpStatusCode.TooManyRequests);
+        _mockHandler.EnqueueErrorResponse(HttpStatusCode.TooManyRequests);
+
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(
+            () => _service.DetectLanguageAsync("Bonjour"));
+
+        exception.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+    }
+
+    private static TranslationRequest CreateEnToEsRequest(string text) => new()
+    {
+        Text = text,
+        FromLanguage = Language.English,
+        ToLanguage = Language.Spanish
+    };
+
+    private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = utcNow;
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+
+        public void Advance(TimeSpan delta) => _utcNow += delta;
     }
 }

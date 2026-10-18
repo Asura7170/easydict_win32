@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Web;
 using Easydict.TranslationService.Models;
 
@@ -14,11 +16,25 @@ public sealed class GoogleTranslateService : BaseTranslationService
 {
     private const string BaseUrl = "https://translate.googleapis.com/translate_a/single";
 
-    // Fallback endpoint used by the Google Translate web frontend (public wt_lib key).
-    // shortcut: the public key may rotate; if 429s reappear, refresh it from
-    // LunaTranslator's translator/google.py (github.com/HIllya51/LunaTranslator)
+    // 429 fallback: the endpoint used by the Google Translate web frontend, called with the
+    // public key embedded in that frontend (wt_lib). Like gtx itself, this endpoint and key are
+    // undocumented and unsupported by Google and may change or stop working at any time, so the
+    // fallback is strictly best-effort. If 429s reappear, refresh the key from
+    // LunaTranslator's translator/google.py (github.com/HIllya51/LunaTranslator).
     private const string WebFallbackUrl = "https://translate-pa.googleapis.com/v1/translateHtml";
     private const string WebFallbackApiKey = "AIzaSyATBXajvzQLTDHEQbcpq0Ihe0vWDHmO520";
+
+    // After a gtx 429, skip gtx for a while and go straight to the web endpoint, so a throttled
+    // client does not send two requests per query. Retry-After is honoured, within a cap.
+    internal static readonly TimeSpan DefaultGtxCooldown = TimeSpan.FromSeconds(60);
+    internal static readonly TimeSpan MaxGtxCooldown = TimeSpan.FromMinutes(5);
+
+    private static readonly Regex BrTagRegex = new(@"<br\s*/?>", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private readonly TimeProvider _timeProvider;
+
+    // UTC ticks until which gtx is skipped; 0 when not throttled. Accessed via Interlocked.
+    private long _gtxCooldownUntilTicks;
 
     private static readonly IReadOnlyList<Language> _googleLanguages =
     [
@@ -34,8 +50,13 @@ public sealed class GoogleTranslateService : BaseTranslationService
         Language.Norwegian, Language.Hebrew
     ];
 
-    public GoogleTranslateService(HttpClient httpClient) : base(httpClient)
+    public GoogleTranslateService(HttpClient httpClient) : this(httpClient, TimeProvider.System)
     {
+    }
+
+    internal GoogleTranslateService(HttpClient httpClient, TimeProvider timeProvider) : base(httpClient)
+    {
+        _timeProvider = timeProvider;
     }
 
     public override string ServiceId => "google";
@@ -53,6 +74,13 @@ public sealed class GoogleTranslateService : BaseTranslationService
             : GetLanguageCode(request.FromLanguage);
         var targetCode = GetLanguageCode(request.ToLanguage);
 
+        if (IsGtxCoolingDown())
+        {
+            // gtx returned 429 recently: don't hit it again until the cooldown expires
+            return await TryTranslateViaWebEndpointAsync(request, sourceCode, targetCode, cancellationToken)
+                ?? throw CreateRateLimitedException();
+        }
+
         var url = BuildUrl(request.Text, sourceCode, targetCode);
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
@@ -63,18 +91,14 @@ public sealed class GoogleTranslateService : BaseTranslationService
         {
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
             {
-                var fallback = await TryTranslateViaWebEndpointAsync(request, sourceCode, targetCode, cancellationToken);
-                if (fallback != null)
-                {
-                    return fallback;
-                }
+                StartGtxCooldown(response);
+                return await TryTranslateViaWebEndpointAsync(request, sourceCode, targetCode, cancellationToken)
+                    ?? throw CreateRateLimitedException();
             }
 
             throw new TranslationException($"Google API error: {response.StatusCode}")
             {
-                ErrorCode = response.StatusCode == HttpStatusCode.TooManyRequests
-                    ? TranslationErrorCode.RateLimited
-                    : TranslationErrorCode.ServiceUnavailable,
+                ErrorCode = TranslationErrorCode.ServiceUnavailable,
                 ServiceId = ServiceId
             };
         }
@@ -87,15 +111,36 @@ public sealed class GoogleTranslateService : BaseTranslationService
         string text,
         CancellationToken cancellationToken = default)
     {
-        var url = BuildUrl(text, "auto", "en");
+        if (!IsGtxCoolingDown())
+        {
+            var url = BuildUrl(text, "auto", "en");
 
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
-        AddBrowserHeaders(httpRequest);
-        using var response = await HttpClient.SendAsync(httpRequest, cancellationToken);
-        response.EnsureSuccessStatusCode();
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Get, url);
+            AddBrowserHeaders(httpRequest);
+            using var response = await HttpClient.SendAsync(httpRequest, cancellationToken);
+            if (response.StatusCode != HttpStatusCode.TooManyRequests)
+            {
+                response.EnsureSuccessStatusCode();
+                var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                return ParseDetectedLanguage(json);
+            }
 
-        var json = await response.Content.ReadAsStringAsync(cancellationToken);
+            StartGtxCooldown(response);
+        }
 
+        // gtx is throttled: the web endpoint also reports the detected source language
+        var fallback = await TryCallWebEndpointAsync(text, "auto", "en", cancellationToken);
+        if (fallback?.Detected is { } detected && detected != Language.Auto)
+        {
+            return detected;
+        }
+
+        throw new HttpRequestException(
+            $"Google API error: {HttpStatusCode.TooManyRequests}", null, HttpStatusCode.TooManyRequests);
+    }
+
+    private static Language ParseDetectedLanguage(string json)
+    {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
@@ -109,6 +154,35 @@ public sealed class GoogleTranslateService : BaseTranslationService
 
         return Language.Auto;
     }
+
+    private bool IsGtxCoolingDown() =>
+        _timeProvider.GetUtcNow().UtcTicks < Interlocked.Read(ref _gtxCooldownUntilTicks);
+
+    private void StartGtxCooldown(HttpResponseMessage response)
+    {
+        var now = _timeProvider.GetUtcNow();
+        var retryAfter = response.Headers.RetryAfter;
+        var cooldown = retryAfter?.Delta
+            ?? (retryAfter?.Date is { } date ? date - now : DefaultGtxCooldown);
+        if (cooldown <= TimeSpan.Zero)
+        {
+            cooldown = DefaultGtxCooldown;
+        }
+        else if (cooldown > MaxGtxCooldown)
+        {
+            cooldown = MaxGtxCooldown;
+        }
+
+        Interlocked.Exchange(ref _gtxCooldownUntilTicks, (now + cooldown).UtcTicks);
+        Debug.WriteLine($"[Google] gtx returned 429; using the web endpoint for {cooldown.TotalSeconds:F0}s.");
+    }
+
+    private TranslationException CreateRateLimitedException() =>
+        new($"Google API error: {HttpStatusCode.TooManyRequests}")
+        {
+            ErrorCode = TranslationErrorCode.RateLimited,
+            ServiceId = ServiceId
+        };
 
     private static string BuildUrl(string text, string sourceCode, string targetCode)
     {
@@ -253,12 +327,8 @@ public sealed class GoogleTranslateService : BaseTranslationService
     }
 
     /// <summary>
-    /// 429 fallback: POST to the endpoint the Google Translate web frontend uses
-    /// (same approach as LunaTranslator's translator/google.py). Plain text only —
-    /// no dictionary/phonetics; DetectedLanguage is read from root[1][0] when the
-    /// endpoint reports it. Returns null on any failure except
-    /// cancellation/timeout (rethrown so the caller's retry policy applies); the
-    /// caller then keeps throwing the original gtx error.
+    /// 429 fallback for translation: plain text only (no dictionary/phonetics).
+    /// Returns null when the web endpoint fails; the caller then reports the gtx rate limit.
     /// </summary>
     private async Task<TranslationResult?> TryTranslateViaWebEndpointAsync(
         TranslationRequest request,
@@ -266,12 +336,40 @@ public sealed class GoogleTranslateService : BaseTranslationService
         string targetCode,
         CancellationToken cancellationToken)
     {
+        var fallback = await TryCallWebEndpointAsync(request.Text, sourceCode, targetCode, cancellationToken);
+        if (fallback is not { } result)
+        {
+            return null;
+        }
+
+        return new TranslationResult
+        {
+            TranslatedText = result.Text,
+            OriginalText = request.Text,
+            DetectedLanguage = result.Detected,
+            TargetLanguage = request.ToLanguage,
+            ServiceName = DisplayName
+        };
+    }
+
+    /// <summary>
+    /// POST to the endpoint the Google Translate web frontend uses (same approach as
+    /// LunaTranslator's translator/google.py). Detected is read from root[1][0] when the
+    /// endpoint reports it. Returns null on any failure except cancellation/timeout
+    /// (rethrown so the caller's retry policy applies).
+    /// </summary>
+    private async Task<(string Text, Language Detected)?> TryCallWebEndpointAsync(
+        string text,
+        string sourceCode,
+        string targetCode,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            // JSON+protobuf body of the web client: [[[[text], sl, tl], "wt_lib"]]
+            // JSON+protobuf body of the web client: [[[[html], sl, tl], "wt_lib"]]
             var payload = JsonSerializer.Serialize(new object[]
             {
-                new object[] { new object[] { request.Text }, sourceCode, targetCode },
+                new object[] { new object[] { EncodeForTranslateHtml(text) }, sourceCode, targetCode },
                 "wt_lib"
             });
 
@@ -285,6 +383,7 @@ public sealed class GoogleTranslateService : BaseTranslationService
             using var response = await HttpClient.SendAsync(httpRequest, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
+                Debug.WriteLine($"[Google] Web endpoint fallback failed: HTTP {(int)response.StatusCode} {response.StatusCode}");
                 return null;
             }
 
@@ -295,11 +394,11 @@ public sealed class GoogleTranslateService : BaseTranslationService
                 root.GetArrayLength() == 0 ||
                 root[0].ValueKind != JsonValueKind.Array)
             {
+                Debug.WriteLine($"[Google] Web endpoint fallback failed: unexpected response shape ({root.ValueKind})");
                 return null;
             }
 
-            // The endpoint returns HTML-escaped text (LunaTranslator unescapes it too);
-            // concatenate all chunks so long inputs are not truncated
+            // The endpoint returns HTML; concatenate all chunks so long inputs are not truncated
             var sb = new StringBuilder();
             foreach (var chunk in root[0].EnumerateArray())
             {
@@ -309,9 +408,10 @@ public sealed class GoogleTranslateService : BaseTranslationService
                 }
             }
 
-            var text = WebUtility.HtmlDecode(sb.ToString());
-            if (string.IsNullOrEmpty(text))
+            var translated = DecodeFromTranslateHtml(sb.ToString());
+            if (string.IsNullOrEmpty(translated))
             {
+                Debug.WriteLine("[Google] Web endpoint fallback failed: empty translation");
                 return null;
             }
 
@@ -325,23 +425,35 @@ public sealed class GoogleTranslateService : BaseTranslationService
                 detected = LanguageCodes.FromIso639(root[1][0].GetString() ?? "");
             }
 
-            return new TranslationResult
-            {
-                TranslatedText = text,
-                OriginalText = request.Text,
-                DetectedLanguage = detected,
-                TargetLanguage = request.ToLanguage,
-                ServiceName = DisplayName
-            };
+            return (translated, detected);
         }
         catch (OperationCanceledException)
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            // Don't log the message for HTTP errors: it may contain request details
+            Debug.WriteLine($"[Google] Web endpoint fallback failed: {ex.GetType().Name}");
             return null;
         }
     }
-}
 
+    /// <summary>
+    /// translateHtml parses its input as HTML: escape markup characters so text such as
+    /// "a &lt; b" or "AT&amp;T" survives, and turn line breaks into &lt;br&gt; so they are kept.
+    /// </summary>
+    internal static string EncodeForTranslateHtml(string text) =>
+        text.Replace("&", "&amp;")
+            .Replace("<", "&lt;")
+            .Replace(">", "&gt;")
+            .Replace("\r\n", "<br>")
+            .Replace("\r", "<br>")
+            .Replace("\n", "<br>");
+
+    /// <summary>
+    /// Reverse of <see cref="EncodeForTranslateHtml"/>: &lt;br&gt; back to "\n", then decode entities.
+    /// </summary>
+    internal static string DecodeFromTranslateHtml(string html) =>
+        WebUtility.HtmlDecode(BrTagRegex.Replace(html, "\n"));
+}
